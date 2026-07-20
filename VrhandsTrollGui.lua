@@ -5,8 +5,8 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
-local AVOID_DISTANCE = 14
-local AVOID_PUSH_SPEED = 1.8
+local AVOID_DISTANCE = 22 -- Increased distance to trigger before fingers touch you
+local AVOID_PUSH_SPEED = 2.0 -- Base slide speed
 
 local bryh = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -98,7 +98,8 @@ TargetSection.Size = UDim2.new(1, 0, 0, 60)
 
 vrName.Name = "vrName"
 vrName.Parent = TargetSection
-vrName.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+vrName.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+vrName.BackgroundTransparency = 1.000
 vrName.BorderSizePixel = 0
 vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
 vrName.Size = UDim2.new(0, 290, 0, 36)
@@ -119,14 +120,18 @@ vrNamePadding.Parent = vrName
 
 refreshBtn.Name = "refreshBtn"
 refreshBtn.Parent = TargetSection
-refreshBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-refreshBtn.BackgroundTransparency = 1.000
+refreshBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+refreshBtn.BorderSizePixel = 0
 refreshBtn.Position = UDim2.new(1, -50, 0.5, -18)
 refreshBtn.Size = UDim2.new(0, 36, 0, 36)
 refreshBtn.Font = Enum.Font.GothamBold
 refreshBtn.Text = "🔄"
 refreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 refreshBtn.TextSize = 14.000
+
+local refreshCorner = Instance.new("UICorner")
+refreshCorner.CornerRadius = UDim.new(0, 6)
+refreshCorner.Parent = refreshBtn
 
 -- Player Search Dropdown
 dropdown.Name = "PlayerDropdown"
@@ -162,7 +167,7 @@ TogglesContainer.BackgroundTransparency = 1.000
 TogglesContainer.BorderSizePixel = 0
 TogglesContainer.Position = UDim2.new(0, 10, 0, 105)
 TogglesContainer.Size = UDim2.new(1, -20, 1, -115)
-TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 570) -- Expanded canvas size to fit all 11 options
+TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 570)
 TogglesContainer.ScrollBarThickness = 4
 TogglesContainer.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
 TogglesContainer.ScrollBarImageTransparency = 0.6
@@ -275,26 +280,45 @@ local function getVRHeadPart(targetPlayer)
 	return nil
 end
 
-local function getVRHandPart(targetPlayer)
+local function getVRHandModel(targetPlayer, handName)
 	if not targetPlayer then return nil end
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		local playerFolder = vrPlayersFolder:FindFirstChild(tostring(targetPlayer.UserId))
 		if playerFolder then
-			local rightHand = playerFolder:FindFirstChild("RightHand")
-			if rightHand then
-				return rightHand:FindFirstChild("ControllerPart") or rightHand:FindFirstChildOfClass("BasePart")
-			end
+			return playerFolder:FindFirstChild(handName)
 		end
 	end
 	local char = targetPlayer.Character
 	if char then
-		local rightHand = char:FindFirstChild("RightHand")
-		if rightHand then
-			return rightHand:FindFirstChild("ControllerPart") or rightHand:FindFirstChildOfClass("BasePart")
-		end
+		return char:FindFirstChild(handName)
 	end
 	return nil
+end
+
+local function getVRHandPart(targetPlayer)
+	local handModel = getVRHandModel(targetPlayer, "RightHand")
+	if handModel then
+		return handModel:FindFirstChild("ControllerPart") or handModel:FindFirstChild("Base") or handModel:FindFirstChildOfClass("BasePart")
+	end
+	return nil
+end
+
+-- Scans a VR Hand model and returns the part physically closest to your character (used for accurate finger-tip avoidance)
+local function getClosestHandPart(handModel, characterHrp)
+	if not handModel or not characterHrp then return nil, math.huge end
+	local closestPart = nil
+	local minDistance = math.huge
+	for _, part in ipairs(handModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local dist = (characterHrp.Position - part.Position).Magnitude
+			if dist < minDistance then
+				minDistance = dist
+				closestPart = part
+			end
+		end
+	end
+	return closestPart, minDistance
 end
 
 -- Dropdown Logic
@@ -568,35 +592,73 @@ createToggle("NoclipHands", "Noclip VR Hands", function(state)
 	end
 end)
 
--- 4. Weld to Hand (Replicating CFrame Method) Handler
-local weldConnection = nil
+-- 4. Weld to Hand (Physics Constraint-Based FE Weld) Handler
+local localAttachment = nil
+local targetAttachment = nil
+local alignPos = nil
+local alignRot = nil
+
 local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(state)
+	local char = Players.LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+
 	if state then
 		local targetPlayer = getActiveTarget()
 		local handPart = getVRHandPart(targetPlayer)
-		local character = Players.LocalPlayer.Character
-		local hrp = character and character:FindFirstChild("HumanoidRootPart")
 
-		if handPart and hrp then
-			weldConnection = RunService.RenderStepped:Connect(function()
-				if handPart and hrp and character and character.Parent then
-					hrp.CFrame = handPart.CFrame
-					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-					hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-				else
-					setWeldUI(false)
-					if weldConnection then weldConnection:Disconnect() weldConnection = nil end
-				end
-			end)
+		if handPart and hrp and hum then
+			-- Clean up existing weld if active
+			if alignPos then alignPos:Destroy() end
+			if alignRot then alignRot:Destroy() end
+			if localAttachment then localAttachment:Destroy() end
+			if targetAttachment then targetAttachment:Destroy() end
+
+			-- Attachment on our own HRP
+			localAttachment = Instance.new("Attachment")
+			localAttachment.Name = "NovolineWeldLocal"
+			localAttachment.Parent = hrp
+
+			-- Attachment on VR player's hand part ( palm / controller center )
+			targetAttachment = Instance.new("Attachment")
+			targetAttachment.Name = "NovolineWeldTarget"
+			targetAttachment.Parent = handPart
+
+			-- Physics AlignPosition
+			alignPos = Instance.new("AlignPosition")
+			alignPos.Name = "NovolineAlignPos"
+			alignPos.Mode = Enum.PositionAlignmentMode.TwoAttachment
+			alignPos.Attachment0 = localAttachment
+			alignPos.Attachment1 = targetAttachment
+			alignPos.MaxForce = 10000000
+			alignPos.Responsiveness = 200
+			alignPos.Parent = hrp
+
+			-- Physics AlignOrientation
+			alignRot = Instance.new("AlignOrientation")
+			alignRot.Name = "NovolineAlignRot"
+			alignRot.Mode = Enum.OrientationAlignmentMode.TwoAttachment
+			alignRot.Attachment0 = localAttachment
+			alignRot.Attachment1 = targetAttachment
+			alignRot.MaxTorque = 10000000
+			alignRot.Responsiveness = 200
+			alignRot.Parent = hrp
+
+			-- Platform stand keeps the Humanoid state controller from resisting the physics pull
+			hum.PlatformStand = true
 		else
 			setWeldUI(false)
 		end
 	else
-		if weldConnection then weldConnection:Disconnect() weldConnection = nil end
+		if alignPos then alignPos:Destroy() alignPos = nil end
+		if alignRot then alignRot:Destroy() alignRot = nil end
+		if localAttachment then localAttachment:Destroy() localAttachment = nil end
+		if targetAttachment then targetAttachment:Destroy() targetAttachment = nil end
+		if hum then hum.PlatformStand = false end
 	end
 end)
 
--- 5. Avoid Target Hand Handler
+-- 5. Avoid Target Hand Handler (Closest Part fingertip scanning + dynamic repulsion)
 local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
@@ -607,35 +669,38 @@ local function handleAvoidTarget()
 
 	local targetPlayer = getActiveTarget()
 	if targetPlayer then
-		local hands = {}
+		local handModels = {}
 		local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 		if vrPlayersFolder then
 			local playerFolder = vrPlayersFolder:FindFirstChild(tostring(targetPlayer.UserId))
 			if playerFolder then
 				local lh = playerFolder:FindFirstChild("LeftHand")
 				local rh = playerFolder:FindFirstChild("RightHand")
-				if lh then table.insert(hands, lh:FindFirstChild("ControllerPart") or lh:FindFirstChildOfClass("BasePart")) end
-				if rh then table.insert(hands, rh:FindFirstChild("ControllerPart") or rh:FindFirstChildOfClass("BasePart")) end
+				if lh then table.insert(handModels, lh) end
+				if rh then table.insert(handModels, rh) end
 			end
 		end
 		
-		if #hands == 0 and targetPlayer.Character then
+		if #handModels == 0 and targetPlayer.Character then
 			local lh = targetPlayer.Character:FindFirstChild("LeftHand")
 			local rh = targetPlayer.Character:FindFirstChild("RightHand")
-			if lh then table.insert(hands, lh:FindFirstChild("ControllerPart") or lh:FindFirstChildOfClass("BasePart")) end
-			if rh then table.insert(hands, rh:FindFirstChild("ControllerPart") or rh:FindFirstChildOfClass("BasePart")) end
+			if lh then table.insert(handModels, lh) end
+			if rh then table.insert(handModels, rh) end
 		end
 
-		for _, handPart in ipairs(hands) do
-			if handPart then
-				local dist = (hrp.Position - handPart.Position).Magnitude
-				if dist < AVOID_DISTANCE then
-					local dir = (hrp.Position - handPart.Position)
-					local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
-					if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
-					hrp.CFrame = hrp.CFrame + (pushDir * AVOID_PUSH_SPEED)
-					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-				end
+		for _, handModel in ipairs(handModels) do
+			local closestPart, dist = getClosestHandPart(handModel, hrp)
+			if closestPart and dist < AVOID_DISTANCE then
+				local dir = (hrp.Position - closestPart.Position)
+				local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
+				if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
+				
+				-- Magnetic Repulsion logic: Pushes with exponentially higher speed as they get closer to the fingertips
+				local ratio = (AVOID_DISTANCE - dist) / AVOID_DISTANCE
+				local currentPushSpeed = AVOID_PUSH_SPEED + (ratio * 5)
+				
+				hrp.CFrame = hrp.CFrame + (pushDir * currentPushSpeed)
+				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 			end
 		end
 	end
@@ -660,46 +725,41 @@ local function handleAvoidAll()
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 
+	local handModels = {}
+
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		for _, playerFolder in ipairs(vrPlayersFolder:GetChildren()) do
 			if playerFolder.Name ~= tostring(Players.LocalPlayer.UserId) then
-				for _, handName in ipairs({"LeftHand", "RightHand"}) do
-					local hand = playerFolder:FindFirstChild(handName)
-					local handPart = hand and (hand:FindFirstChild("ControllerPart") or hand:FindFirstChildOfClass("BasePart"))
-					if handPart then
-						local dist = (hrp.Position - handPart.Position).Magnitude
-						if dist < AVOID_DISTANCE then
-							local dir = (hrp.Position - handPart.Position)
-							local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
-							if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
-							hrp.CFrame = hrp.CFrame + (pushDir * AVOID_PUSH_SPEED)
-							hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-						end
-					end
-				end
+				local lh = playerFolder:FindFirstChild("LeftHand")
+				local rh = playerFolder:FindFirstChild("RightHand")
+				if lh then table.insert(handModels, lh) end
+				if rh then table.insert(handModels, rh) end
 			end
 		end
 	end
 
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p ~= Players.LocalPlayer and p.Character then
-			for _, handName in ipairs({"LeftHand", "RightHand"}) do
-				local hand = p.Character:FindFirstChild(handName)
-				if hand and hand:IsA("Model") then
-					local handPart = hand:FindFirstChild("ControllerPart") or hand:FindFirstChildOfClass("BasePart")
-					if handPart then
-						local dist = (hrp.Position - handPart.Position).Magnitude
-						if dist < AVOID_DISTANCE then
-							local dir = (hrp.Position - handPart.Position)
-							local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
-							if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
-							hrp.CFrame = hrp.CFrame + (pushDir * AVOID_PUSH_SPEED)
-							hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-						end
-					end
-				end
-			end
+			local lh = p.Character:FindFirstChild("LeftHand")
+			local rh = p.Character:FindFirstChild("RightHand")
+			if lh and lh:IsA("Model") then table.insert(handModels, lh) end
+			if rh and rh:IsA("Model") then table.insert(handModels, rh) end
+		end
+	end
+
+	for _, handModel in ipairs(handModels) do
+		local closestPart, dist = getClosestHandPart(handModel, hrp)
+		if closestPart and dist < AVOID_DISTANCE then
+			local dir = (hrp.Position - closestPart.Position)
+			local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
+			if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
+			
+			local ratio = (AVOID_DISTANCE - dist) / AVOID_DISTANCE
+			local currentPushSpeed = AVOID_PUSH_SPEED + (ratio * 5)
+			
+			hrp.CFrame = hrp.CFrame + (pushDir * currentPushSpeed)
+			hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 end
@@ -784,7 +844,7 @@ createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", function(state)
 	end
 end)
 
--- 11. FE Air-Walk Handler (New Pop-up Sub-GUI Feature)
+-- 11. FE Air-Walk Handler (Pop-up Sub-GUI Feature)
 local airWalkEnabled = false
 local platformPart = nil
 local airWalkConnection = nil
@@ -988,6 +1048,16 @@ close.MouseButton1Down:Connect(function()
 	if weldConnection then weldConnection:Disconnect() end
 	if avoidTargetConnection then avoidTargetConnection:Disconnect() end
 	if avoidAllConnection then avoidAllConnection:Disconnect() end
+	
+	-- Clean up physical weld elements
+	if alignPos then alignPos:Destroy() end
+	if alignRot then alignRot:Destroy() end
+	if localAttachment then localAttachment:Destroy() end
+	if targetAttachment then targetAttachment:Destroy() end
+	local localChar = Players.LocalPlayer.Character
+	local hum = localChar and localChar:FindFirstChildOfClass("Humanoid")
+	if hum then hum.PlatformStand = false end
+
 	disableAirWalk()
 	bryh:Destroy()
 end)
