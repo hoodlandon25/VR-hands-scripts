@@ -100,7 +100,8 @@ TargetSection.Size = UDim2.new(1, 0, 0, 60)
 
 vrName.Name = "vrName"
 vrName.Parent = TargetSection
-vrName.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+vrName.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+vrName.BackgroundTransparency = 1.000
 vrName.BorderSizePixel = 0
 vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
 vrName.Size = UDim2.new(0, 290, 0, 36)
@@ -1050,7 +1051,6 @@ local function enableAirWalk(setMainToggleUI)
 	posCorner.CornerRadius = UDim.new(0, 4)
 	posCorner.Parent = posBtn
 
-	local posIndex = 2 -- Default Top-Right
 	local positions = {
 		UDim2.new(0, 15, 0, 15),     -- TL
 		UDim2.new(1, -125, 0, 15),   -- TR
@@ -1175,30 +1175,47 @@ end)
 -- 12. Void Safety Platform Handler (Anti Void Death)
 local voidFloorPart = nil
 local voidFloorEnabled = false
+local voidFloorConnection = nil
+
+local function disableVoidFloor()
+	if voidFloorConnection then voidFloorConnection:Disconnect() voidFloorConnection = nil end
+	if voidFloorPart then voidFloorPart:Destroy() voidFloorPart = nil end
+	voidFloorEnabled = false
+end
+
+local function enableVoidFloor()
+	voidFloorEnabled = true
+	if voidFloorPart then voidFloorPart:Destroy() end
+	
+	-- Placed safely at -75 studs to capture character completely above the detected -105.6 server death barrier
+	local safeY = -75
+	
+	voidFloorPart = Instance.new("Part")
+	voidFloorPart.Name = "NovolineVoidSafetyFloor"
+	voidFloorPart.Size = Vector3.new(200, 5, 200) -- Clean 200x200 foot area
+	voidFloorPart.Material = Enum.Material.Glass
+	voidFloorPart.Color = Color3.fromRGB(0, 100, 200)
+	voidFloorPart.Transparency = 0.7
+	voidFloorPart.Anchored = true
+	voidFloorPart.CanCollide = true
+	voidFloorPart.Parent = workspace
+
+	-- Heartbeat loop to keep the void safety platform directly beneath the player horizontally
+	if voidFloorConnection then voidFloorConnection:Disconnect() end
+	voidFloorConnection = RunService.Heartbeat:Connect(function()
+		local char = Players.LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and voidFloorPart then
+			voidFloorPart.CFrame = CFrame.new(hrp.Position.X, safeY, hrp.Position.Z)
+		end
+	end)
+end
 
 createToggle("VoidSafety", "Void Safety Platform", function(state)
-	voidFloorEnabled = state
 	if state then
-		if voidFloorPart then voidFloorPart:Destroy() end
-		
-		-- Raised to exactly -75 studs to capture character completely above the detected -105.6 server death barrier
-		local safeY = -75
-		
-		voidFloorPart = Instance.new("Part")
-		voidFloorPart.Name = "NovolineVoidSafetyFloor"
-		voidFloorPart.Size = Vector3.new(4000, 5, 4000)
-		voidFloorPart.Position = Vector3.new(0, safeY, 0)
-		voidFloorPart.Material = Enum.Material.Glass
-		voidFloorPart.Color = Color3.fromRGB(0, 100, 200)
-		voidFloorPart.Transparency = 0.7
-		voidFloorPart.Anchored = true
-		voidFloorPart.CanCollide = true
-		voidFloorPart.Parent = workspace
+		enableVoidFloor()
 	else
-		if voidFloorPart then
-			voidFloorPart:Destroy()
-			voidFloorPart = nil
-		end
+		disableVoidFloor()
 	end
 end)
 
@@ -1226,7 +1243,6 @@ close.Activated:Connect(function()
 	stopTouchInterestDestroyer()
 	stopJointDestroyer()
 	restoreCharacterCollisions()
-	
-	if voidFloorPart then voidFloorPart:Destroy() end
+	disableVoidFloor()
 	bryh:Destroy()
 end)
