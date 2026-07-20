@@ -5,8 +5,7 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
-local AVOID_DISTANCE = 22 -- Increased distance to trigger before fingers touch you
-local AVOID_PUSH_SPEED = 2.0 -- Base slide speed
+local AVOID_DISTANCE = 22 -- Safe distance barrier (in studs)
 
 local bryh = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -76,6 +75,7 @@ close.Font = Enum.Font.GothamMedium
 close.Text = "×"
 close.TextColor3 = Color3.fromRGB(150, 150, 150)
 close.TextSize = 22.000
+close.Active = true
 
 mini.Name = "mini"
 mini.Parent = TopBar
@@ -87,6 +87,7 @@ mini.Font = Enum.Font.GothamMedium
 mini.Text = "–"
 mini.TextColor3 = Color3.fromRGB(150, 150, 150)
 mini.TextSize = 18.000
+mini.Active = true
 
 -- Target Selection Panel
 TargetSection.Name = "TargetSection"
@@ -98,8 +99,7 @@ TargetSection.Size = UDim2.new(1, 0, 0, 60)
 
 vrName.Name = "vrName"
 vrName.Parent = TargetSection
-vrName.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-vrName.BackgroundTransparency = 1.000
+vrName.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 vrName.BorderSizePixel = 0
 vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
 vrName.Size = UDim2.new(0, 290, 0, 36)
@@ -128,10 +128,7 @@ refreshBtn.Font = Enum.Font.GothamBold
 refreshBtn.Text = "🔄"
 refreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 refreshBtn.TextSize = 14.000
-
-local refreshCorner = Instance.new("UICorner")
-refreshCorner.CornerRadius = UDim.new(0, 6)
-refreshCorner.Parent = refreshBtn
+refreshBtn.Active = true
 
 -- Player Search Dropdown
 dropdown.Name = "PlayerDropdown"
@@ -213,7 +210,7 @@ end)
 -- Minimize/Maximize Animation
 local minimized = false
 local originalHeight = 440
-mini.MouseButton1Down:Connect(function()
+mini.Activated:Connect(function()
 	minimized = not minimized
 	local targetHeight = minimized and 40 or originalHeight
 	
@@ -348,12 +345,13 @@ local function updateDropdown()
 				btn.TextXAlignment = Enum.TextXAlignment.Left
 				btn.ZIndex = 101
 				btn.Parent = dropdown
+				btn.Active = true
 
 				local btnCorner = Instance.new("UICorner")
 				btnCorner.CornerRadius = UDim.new(0, 4)
 				btnCorner.Parent = btn
 
-				btn.MouseButton1Down:Connect(function()
+				btn.Activated:Connect(function()
 					selectedPlayer = p
 					vrName.Text = p.Name
 					dropdown.Visible = false
@@ -376,7 +374,7 @@ vrName.Focused:Connect(function()
 	updateDropdown()
 end)
 
-refreshBtn.MouseButton1Down:Connect(updateDropdown)
+refreshBtn.Activated:Connect(updateDropdown)
 
 UserInputService.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -423,13 +421,14 @@ local function createToggle(name, text, onClickCallback)
 	btn.TextColor3 = Color3.fromRGB(150, 150, 150)
 	btn.TextSize = 10
 	btn.Parent = frame
+	btn.Active = true
 
 	local btnCorner = Instance.new("UICorner")
 	btnCorner.CornerRadius = UDim.new(0, 4)
 	btnCorner.Parent = btn
 
 	local state = false
-	btn.MouseButton1Down:Connect(function()
+	btn.Activated:Connect(function()
 		state = not state
 		if state then
 			btn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
@@ -658,7 +657,7 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 	end
 end)
 
--- 5. Avoid Target Hand Handler (Closest Part fingertip scanning + dynamic repulsion)
+-- 5. Avoid Target Hand Handler (Forcefield Snap Mode)
 local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
@@ -695,11 +694,9 @@ local function handleAvoidTarget()
 				local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 				if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
 				
-				-- Magnetic Repulsion logic: Pushes with exponentially higher speed as they get closer to the fingertips
-				local ratio = (AVOID_DISTANCE - dist) / AVOID_DISTANCE
-				local currentPushSpeed = AVOID_PUSH_SPEED + (ratio * 5)
-				
-				hrp.CFrame = hrp.CFrame + (pushDir * currentPushSpeed)
+				-- Instant boundary snap keeps you cleanly outside of grab reach instantly
+				local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
+				hrp.CFrame = CFrame.new(safePos)
 				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 			end
 		end
@@ -716,7 +713,7 @@ createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 	end
 end)
 
--- 6. Avoid All Hands Handler
+-- 6. Avoid All Hands Handler (Forcefield Snap Mode)
 local avoidAllEnabled = false
 local avoidAllConnection = nil
 
@@ -755,10 +752,8 @@ local function handleAvoidAll()
 			local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 			if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
 			
-			local ratio = (AVOID_DISTANCE - dist) / AVOID_DISTANCE
-			local currentPushSpeed = AVOID_PUSH_SPEED + (ratio * 5)
-			
-			hrp.CFrame = hrp.CFrame + (pushDir * currentPushSpeed)
+			local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
+			hrp.CFrame = CFrame.new(safePos)
 			hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
@@ -921,8 +916,10 @@ local function enableAirWalk(setMainToggleUI)
 	posBtn.Font = Enum.Font.GothamBold
 	posBtn.Text = "📍 CYCLE"
 	posBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+	posBtn.TextScaled = true
 	posBtn.TextSize = 10
 	posBtn.Parent = subGui
+	posBtn.Active = true
 
 	local posCorner = Instance.new("UICorner")
 	posCorner.CornerRadius = UDim.new(0, 4)
@@ -936,7 +933,7 @@ local function enableAirWalk(setMainToggleUI)
 		UDim2.new(1, -125, 1, -160)  -- BR
 	}
 
-	posBtn.MouseButton1Down:Connect(function()
+	posBtn.Activated:Connect(function()
 		posIndex = (posIndex % 4) + 1
 		subGui.Position = positions[posIndex]
 	end)
@@ -948,8 +945,10 @@ local function enableAirWalk(setMainToggleUI)
 	upBtn.Font = Enum.Font.GothamBold
 	upBtn.Text = "▲ UP"
 	upBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
+	upBtn.TextScaled = true
 	upBtn.TextSize = 12
 	upBtn.Parent = subGui
+	upBtn.Active = true
 
 	local upCorner = Instance.new("UICorner")
 	upCorner.CornerRadius = UDim.new(0, 4)
@@ -962,8 +961,10 @@ local function enableAirWalk(setMainToggleUI)
 	downBtn.Font = Enum.Font.GothamBold
 	downBtn.Text = "▼ DOWN"
 	downBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
+	downBtn.TextScaled = true
 	downBtn.TextSize = 12
 	downBtn.Parent = subGui
+	downBtn.Active = true
 
 	local downCorner = Instance.new("UICorner")
 	downCorner.CornerRadius = UDim.new(0, 4)
@@ -976,8 +977,10 @@ local function enableAirWalk(setMainToggleUI)
 	unexecBtn.Font = Enum.Font.GothamBold
 	unexecBtn.Text = "❌ UNEXEC"
 	unexecBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+	unexecBtn.TextScaled = true
 	unexecBtn.TextSize = 10
 	unexecBtn.Parent = subGui
+	unexecBtn.Active = true
 
 	local unexecCorner = Instance.new("UICorner")
 	unexecCorner.CornerRadius = UDim.new(0, 4)
@@ -994,6 +997,9 @@ local function enableAirWalk(setMainToggleUI)
 			goingUp = false
 		end
 	end)
+	upBtn.MouseLeave:Connect(function()
+		goingUp = false
+	end)
 
 	downBtn.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1005,8 +1011,11 @@ local function enableAirWalk(setMainToggleUI)
 			goingDown = false
 		end
 	end)
+	downBtn.MouseLeave:Connect(function()
+		goingDown = false
+	end)
 
-	unexecBtn.MouseButton1Down:Connect(function()
+	unexecBtn.Activated:Connect(function()
 		setMainToggleUI(false) -- Updates toggle menu state
 		disableAirWalk()       -- Disables script and removes assets
 	end)
@@ -1039,7 +1048,7 @@ local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", fun
 end)
 
 -- Close Button Connection Cleanup
-close.MouseButton1Down:Connect(function()
+close.Activated:Connect(function()
 	if annoyConnection then annoyConnection:Disconnect() end
 	if annoyPart then annoyPart:Destroy() end
 	if handWeld then handWeld:Destroy() end
