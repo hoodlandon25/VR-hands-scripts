@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
 local AVOID_DISTANCE = 22 -- Safe distance barrier (in studs)
+local AVOID_PUSH_SPEED = 2.0
 
 local bryh = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -168,7 +169,7 @@ TogglesContainer.BackgroundTransparency = 1.000
 TogglesContainer.BorderSizePixel = 0
 TogglesContainer.Position = UDim2.new(0, 10, 0, 105)
 TogglesContainer.Size = UDim2.new(1, -20, 1, -115)
-TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 570)
+TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 620) -- Expanded canvas size to fit all 12 options
 TogglesContainer.ScrollBarThickness = 4
 TogglesContainer.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
 TogglesContainer.ScrollBarImageTransparency = 0.6
@@ -480,6 +481,38 @@ end
 -- Feature Functionality & Handlers
 -- ==========================================================
 
+-- Client-Side TouchInterest Destroyer (prevents fast touch grabbing)
+local touchInterestConnection = nil
+local function startTouchInterestDestroyer()
+	if touchInterestConnection then return end
+	touchInterestConnection = RunService.Heartbeat:Connect(function()
+		local char = Players.LocalPlayer.Character
+		if char then
+			for _, child in ipairs(char:GetDescendants()) do
+				if child:IsA("TouchTransmitter") or child.Name == "TouchInterest" then
+					child:Destroy()
+				end
+			end
+		end
+	end)
+end
+
+local function stopTouchInterestDestroyer()
+	if touchInterestConnection then
+		touchInterestConnection:Disconnect()
+		touchInterestConnection = nil
+	end
+end
+
+-- Updates the touchinterest destroyer depending on active features
+local function updateTouchInterestDestroyerState()
+	if antiGrabEnabled or avoidTargetEnabled or avoidAllEnabled then
+		startTouchInterestDestroyer()
+	else
+		stopTouchInterestDestroyer()
+	end
+end
+
 -- 1. Annoy Player Handler
 local annoying = false
 local annoyConnection = nil
@@ -532,7 +565,6 @@ local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", function(stat
 end)
 
 -- 2. Anti Grab (LetMeGo method) Handler
-local antiGrabEnabled = false
 local grabConnection = nil
 local charAddedConnection = nil
 
@@ -562,6 +594,7 @@ end
 
 createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", function(state)
 	antiGrabEnabled = state
+	updateTouchInterestDestroyerState()
 	if state then
 		local char = Players.LocalPlayer.Character
 		setupCharConnections(char)
@@ -573,6 +606,7 @@ createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", function(state)
 	else
 		if grabConnection then grabConnection:Disconnect() grabConnection = nil end
 		if charAddedConnection then charAddedConnection:Disconnect() charAddedConnection = nil end
+		restoreCharacterCollisions()
 	end
 end)
 
@@ -625,23 +659,19 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 		local handPart = getVRHandPart(targetPlayer)
 
 		if handPart and hrp and hum then
-			-- Clean up existing weld if active
 			if alignPos then alignPos:Destroy() end
 			if alignRot then alignRot:Destroy() end
 			if localAttachment then localAttachment:Destroy() end
 			if targetAttachment then targetAttachment:Destroy() end
 
-			-- Attachment on our own HRP
 			localAttachment = Instance.new("Attachment")
 			localAttachment.Name = "NovolineWeldLocal"
 			localAttachment.Parent = hrp
 
-			-- Attachment on VR player's hand part ( palm / controller center )
 			targetAttachment = Instance.new("Attachment")
 			targetAttachment.Name = "NovolineWeldTarget"
 			targetAttachment.Parent = handPart
 
-			-- Physics AlignPosition
 			alignPos = Instance.new("AlignPosition")
 			alignPos.Name = "NovolineAlignPos"
 			alignPos.Mode = Enum.PositionAlignmentMode.TwoAttachment
@@ -651,7 +681,6 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 			alignPos.Responsiveness = 200
 			alignPos.Parent = hrp
 
-			-- Physics AlignOrientation
 			alignRot = Instance.new("AlignOrientation")
 			alignRot.Name = "NovolineAlignRot"
 			alignRot.Mode = Enum.OrientationAlignmentMode.TwoAttachment
@@ -661,7 +690,6 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 			alignRot.Responsiveness = 200
 			alignRot.Parent = hrp
 
-			-- Platform stand keeps the Humanoid state controller from resisting the physics pull
 			hum.PlatformStand = true
 		else
 			setWeldUI(false)
@@ -675,8 +703,7 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 	end
 end)
 
--- 5. Avoid Target Hand Handler (Forcefield Snap Mode + Ghost Bypass)
-local avoidTargetEnabled = false
+-- 5. Avoid Target Hand Handler (Forcefield Snap Mode + Ghost Bypass + Fling Prevention)
 local avoidTargetConnection = nil
 
 local function handleAvoidTarget()
@@ -718,7 +745,14 @@ local function handleAvoidTarget()
 				-- Instant boundary snap + high velocity boost to bypass server interpolation lag
 				local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
 				hrp.CFrame = CFrame.new(safePos)
-				hrp.AssemblyLinearVelocity = pushDir * 180 -- Instant replication vector
+				
+				-- Check grab attribute to prevent fling overlapping forces
+				local isGrabbed = char:GetAttribute("Grabbed")
+				if isGrabbed then
+					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				else
+					hrp.AssemblyLinearVelocity = pushDir * 80 -- Safer replication speed
+				end
 			end
 		end
 
@@ -736,6 +770,7 @@ end
 
 createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 	avoidTargetEnabled = state
+	updateTouchInterestDestroyerState()
 	if state then
 		if avoidTargetConnection then avoidTargetConnection:Disconnect() end
 		avoidTargetConnection = RunService.RenderStepped:Connect(handleAvoidTarget)
@@ -745,8 +780,7 @@ createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 	end
 end)
 
--- 6. Avoid All Hands Handler (Forcefield Snap Mode + Ghost Bypass)
-local avoidAllEnabled = false
+-- 6. Avoid All Hands Handler (Forcefield Snap Mode + Ghost Bypass + Fling Prevention)
 local avoidAllConnection = nil
 
 local function handleAvoidAll()
@@ -789,7 +823,13 @@ local function handleAvoidAll()
 			
 			local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
 			hrp.CFrame = CFrame.new(safePos)
-			hrp.AssemblyLinearVelocity = pushDir * 180
+			
+			local isGrabbed = char:GetAttribute("Grabbed")
+			if isGrabbed then
+				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+			else
+				hrp.AssemblyLinearVelocity = pushDir * 80
+			end
 		end
 	end
 
@@ -806,6 +846,7 @@ end
 
 createToggle("AvoidAll", "Avoid All VR Players' Hands", function(state)
 	avoidAllEnabled = state
+	updateTouchInterestDestroyerState()
 	if state then
 		if avoidAllConnection then avoidAllConnection:Disconnect() end
 		avoidAllConnection = RunService.RenderStepped:Connect(handleAvoidAll)
@@ -1093,6 +1134,37 @@ local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", fun
 	end
 end)
 
+-- 12. Void Safety Platform Handler (Anti Void Death)
+local voidFloorPart = nil
+local voidFloorEnabled = false
+
+createToggle("VoidSafety", "Void Safety Platform", function(state)
+	voidFloorEnabled = state
+	if state then
+		if voidFloorPart then voidFloorPart:Destroy() end
+		
+		-- Reads the server's void destruction height and spawns the floor just above it
+		local destroyHeight = workspace.FallenPartsDestroyHeight
+		local safeY = destroyHeight + 20
+		
+		voidFloorPart = Instance.new("Part")
+		voidFloorPart.Name = "NovolineVoidSafetyFloor"
+		voidFloorPart.Size = Vector3.new(4000, 5, 4000)
+		voidFloorPart.Position = Vector3.new(0, safeY, 0)
+		voidFloorPart.Material = Enum.Material.Glass
+		voidFloorPart.Color = Color3.fromRGB(0, 100, 200)
+		voidFloorPart.Transparency = 0.7
+		voidFloorPart.Anchored = true
+		voidFloorPart.CanCollide = true
+		voidFloorPart.Parent = workspace
+	else
+		if voidFloorPart then
+			voidFloorPart:Destroy()
+			voidFloorPart = nil
+		end
+	end
+end)
+
 -- Close Button Connection Cleanup
 close.Activated:Connect(function()
 	if annoyConnection then annoyConnection:Disconnect() end
@@ -1114,6 +1186,9 @@ close.Activated:Connect(function()
 	if hum then hum.PlatformStand = false end
 
 	disableAirWalk()
+	stopTouchInterestDestroyer()
 	restoreCharacterCollisions()
+	
+	if voidFloorPart then voidFloorPart:Destroy() end
 	bryh:Destroy()
 end)
