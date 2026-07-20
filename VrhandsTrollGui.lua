@@ -2,6 +2,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local bryh = Instance.new("ScreenGui")
 local Bar = Instance.new("Frame")
@@ -206,7 +207,6 @@ end)
 local function getVRHeadPart(targetPlayer)
 	if not targetPlayer then return nil end
 	
-	-- Check inside workspace.VRPlayers (the user identifier folder)
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		local playerFolder = vrPlayersFolder:FindFirstChild(tostring(targetPlayer.UserId))
@@ -218,7 +218,6 @@ local function getVRHeadPart(targetPlayer)
 		end
 	end
 	
-	-- Check target player's character as a fallback
 	local char = targetPlayer.Character
 	if char then
 		local vrHead = char:FindFirstChild("VRHead")
@@ -233,7 +232,6 @@ end
 local function getVRHandPart(targetPlayer)
 	if not targetPlayer then return nil end
 
-	-- Check inside workspace.VRPlayers
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		local playerFolder = vrPlayersFolder:FindFirstChild(tostring(targetPlayer.UserId))
@@ -245,7 +243,6 @@ local function getVRHandPart(targetPlayer)
 		end
 	end
 
-	-- Check character as a fallback
 	local char = targetPlayer.Character
 	if char then
 		local rightHand = char:FindFirstChild("RightHand")
@@ -276,7 +273,6 @@ annoy.MouseButton1Down:Connect(function()
 	if not annoying then
 		local targetPlayer = selectedPlayer
 		if not targetPlayer or targetPlayer.Parent == nil then
-			-- Typed name fallback search
 			local typedText = vrName.Text:lower()
 			for _, p in ipairs(Players:GetPlayers()) do
 				if p.Name:lower() == typedText or p.DisplayName:lower() == typedText then
@@ -340,7 +336,40 @@ annoy.MouseButton1Down:Connect(function()
 	end
 end)
 
-local pickup = true
+-- Direct Remote Anti-Grab Integration
+local antiGrabEnabled = false
+local grabConnection = nil
+local charAddedConnection = nil
+
+local pinchRemote = ReplicatedStorage:WaitForChild("COM", 5)
+if pinchRemote then
+	pinchRemote = pinchRemote:WaitForChild("Pinch", 5)
+	if pinchRemote then
+		pinchRemote = pinchRemote:WaitForChild("LetMeGo", 5)
+	end
+end
+
+local function checkAndRelease(character)
+	if antiGrabEnabled and character and character:GetAttribute("Grabbed") then
+		if pinchRemote then
+			pinchRemote:FireServer()
+		end
+	end
+end
+
+local function setupCharConnections(character)
+	if grabConnection then
+		grabConnection:Disconnect()
+		grabConnection = nil
+	end
+	if not character then return end
+	
+	checkAndRelease(character)
+	grabConnection = character:GetAttributeChangedSignal("Grabbed"):Connect(function()
+		checkAndRelease(character)
+	end)
+end
+
 plrpickup.Name = "plrpickup"
 plrpickup.Parent = pg1
 plrpickup.BackgroundColor3 = Color3.fromRGB(218, 36, 36)
@@ -354,23 +383,27 @@ plrpickup.TextScaled = true
 plrpickup.TextSize = 14.000
 plrpickup.TextWrapped = true
 plrpickup.MouseButton1Down:Connect(function()
-	local localChar = Players.LocalPlayer.Character
-	if not localChar then return end
-
-	if pickup then
-		pickup = false
-		local hum = localChar:FindFirstChildOfClass("Humanoid")
-		if hum then
-			hum.Name = "lol"
-		end
+	antiGrabEnabled = not antiGrabEnabled
+	if antiGrabEnabled then
 		plrpickup.Text = "Enable VR Pickup"
-	else
-		pickup = true
-		local hum = localChar:FindFirstChild("lol")
-		if hum then
-			hum.Name = "Humanoid"
+		local char = Players.LocalPlayer.Character
+		setupCharConnections(char)
+		
+		if not charAddedConnection then
+			charAddedConnection = Players.LocalPlayer.CharacterAdded:Connect(function(chara)
+				setupCharConnections(chara)
+			end)
 		end
+	else
 		plrpickup.Text = "Disable VR Pickup"
+		if grabConnection then
+			grabConnection:Disconnect()
+			grabConnection = nil
+		end
+		if charAddedConnection then
+			charAddedConnection:Disconnect()
+			charAddedConnection = nil
+		end
 	end
 end)
 
@@ -391,7 +424,6 @@ nocliphands.MouseButton1Down:Connect(function()
 	nocliphand = not nocliphand
 	nocliphands.Text = nocliphand and "Clip VR Hands" or "Noclip VR Hands"
 
-	-- Noclip hands in workspace.VRPlayers
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		for _, playerFolder in ipairs(vrPlayersFolder:GetChildren()) do
@@ -408,7 +440,6 @@ nocliphands.MouseButton1Down:Connect(function()
 		end
 	end
 
-	-- Noclip hands on player character models
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p ~= Players.LocalPlayer and p.Character then
 			for _, handName in ipairs({"RightHand", "LeftHand"}) do
@@ -447,7 +478,6 @@ weldtohands.MouseButton1Down:Connect(function()
 	if not weldtohand then
 		local targetPlayer = selectedPlayer
 		if not targetPlayer or targetPlayer.Parent == nil then
-			-- Typed name fallback search
 			local typedText = vrName.Text:lower()
 			for _, p in ipairs(Players:GetPlayers()) do
 				if p.Name:lower() == typedText or p.DisplayName:lower() == typedText then
@@ -610,7 +640,6 @@ noclipheads.MouseButton1Down:Connect(function()
 	headnoclip = not headnoclip
 	noclipheads.Text = headnoclip and "Clip VR Heads" or "Noclip VR Heads"
 	
-	-- Noclip heads in workspace.VRPlayers
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		for _, playerFolder in ipairs(vrPlayersFolder:GetChildren()) do
@@ -625,7 +654,6 @@ noclipheads.MouseButton1Down:Connect(function()
 		end
 	end
 
-	-- Noclip heads in player characters
 	for _, p in ipairs(Players:GetPlayers()) do
 		if p ~= Players.LocalPlayer and p.Character then
 			local vrHead = p.Character:FindFirstChild("VRHead")
@@ -668,6 +696,8 @@ close.MouseButton1Down:Connect(function()
 	if annoyConnection then annoyConnection:Disconnect() end
 	if annoyPart then annoyPart:Destroy() end
 	if handWeld then handWeld:Destroy() end
+	if grabConnection then grabConnection:Disconnect() end
+	if charAddedConnection then charAddedConnection:Disconnect() end
 	bryh:Destroy()
 end)
 
