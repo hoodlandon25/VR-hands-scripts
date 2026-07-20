@@ -5,7 +5,7 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
-local AVOID_DISTANCE = 30 -- Increased safe zone boundary (in studs)
+local AVOID_DISTANCE = 30 -- Safe distance barrier (in studs)
 local SAFE_DISTANCE = 32 -- Repel snap boundary
 
 local bryh = Instance.new("ScreenGui")
@@ -603,7 +603,6 @@ local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", function(stat
 end)
 
 -- 2. Anti Grab (LetMeGo method) Handler
-local antiGrabEnabled = false
 local grabConnection = nil
 local charAddedConnection = nil
 
@@ -756,7 +755,6 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 end)
 
 -- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
-local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
 local function handleAvoidTarget()
@@ -827,7 +825,6 @@ createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 end)
 
 -- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
-local avoidAllEnabled = false
 local avoidAllConnection = nil
 
 local function handleAvoidAll()
@@ -1184,8 +1181,8 @@ createToggle("VoidSafety", "Void Safety Platform", function(state)
 	if state then
 		if voidFloorPart then voidFloorPart:Destroy() end
 		
-		-- Spawns the floor at a safe altitude above custom server-side void kill scripts
-		local safeY = -90
+		-- Raised to exactly -75 studs to capture character completely above the detected -105.6 server death barrier
+		local safeY = -75
 		
 		voidFloorPart = Instance.new("Part")
 		voidFloorPart.Name = "NovolineVoidSafetyFloor"
