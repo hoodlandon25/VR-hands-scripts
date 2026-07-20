@@ -719,26 +719,93 @@ end
 local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", toggleAnnoy)
 
 -- 2. Anti Grab (LetMeGo method) Handler
+local antiGrabEnabled = false
+local grabConnection = nil
+local descConnection = nil
+local charAddedConnection = nil
+
+local pinchRemote = nil
+pcall(function()
+	pinchRemote = ReplicatedStorage:WaitForChild("COM"):WaitForChild("Pinch"):WaitForChild("LetMeGo")
+end)
+
+local function checkAndRelease(character)
+	if not antiGrabEnabled or not character then return end
+	
+	local isGrabbed = character:GetAttribute("Grabbed")
+	local hasWeld = false
+	
+	for _, part in ipairs(character:GetChildren()) do
+		if part:IsA("BasePart") then
+			for _, joint in ipairs(part:GetJoints()) do
+				local otherPart = (joint.Part0 == part) and joint.Part1 or joint.Part0
+				if otherPart and not otherPart:IsDescendantOf(character) then
+					hasWeld = true
+					joint:Destroy()
+				end
+			end
+			for _, child in ipairs(part:GetChildren()) do
+				if child:IsA("WeldConstraint") then
+					local otherPart = (child.Part0 == part) and child.Part1 or child.Part0
+					if otherPart and not otherPart:IsDescendantOf(character) then
+						hasWeld = true
+						child:Destroy()
+					end
+				end
+			end
+		end
+	end
+
+	if isGrabbed or hasWeld then
+		if pinchRemote then
+			pinchRemote:FireServer()
+		end
+	end
+end
+
+local function setupCharConnections(character)
+	if grabConnection then grabConnection:Disconnect() grabConnection = nil end
+	if descConnection then descConnection:Disconnect() descConnection = nil end
+	if not character then return end
+	
+	checkAndRelease(character)
+	
+	grabConnection = character:GetAttributeChangedSignal("Grabbed"):Connect(function()
+		checkAndRelease(character)
+	end)
+	
+	descConnection = character.DescendantAdded:Connect(function(desc)
+		if desc:IsA("JointInstance") or desc:IsA("WeldConstraint") then
+			task.wait()
+			checkAndRelease(character)
+		end
+	end)
+end
+
 local function toggleAntiGrab(state)
 	antiGrabEnabled = state
 	updateTouchInterestDestroyerState()
 	if state then
 		local char = Players.LocalPlayer.Character
-		setupCharConnections(char)
+		if char then
+			setupCharConnections(char)
+		end
 		startJointDestroyer() -- Launches background joint cutter
 		if not charAddedConnection then
 			charAddedConnection = Players.LocalPlayer.CharacterAdded:Connect(function(chara)
+				task.wait(0.5)
 				setupCharConnections(chara)
 			end)
 		end
 	else
 		stopJointDestroyer()
 		if grabConnection then grabConnection:Disconnect() grabConnection = nil end
+		if descConnection then descConnection:Disconnect() descConnection = nil end
 		if charAddedConnection then charAddedConnection:Disconnect() charAddedConnection = nil end
 		restoreCharacterCollisions()
 	end
 end
-createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", toggleAntiGrab)
+local _, setAntiGrabUI = createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", toggleAntiGrab)
 
 -- 3. Noclip VR Hands Handler
 local nocliphand = false
@@ -836,6 +903,7 @@ end
 local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", toggleFEWeld)
 
 -- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
+local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
 local function handleAvoidTarget()
@@ -907,6 +975,7 @@ end
 createToggle("AvoidTarget", "Avoid Target VR Player's Hand", toggleAvoidTarget)
 
 -- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
+local avoidAllEnabled = false
 local avoidAllConnection = nil
 
 local function handleAvoidAll()
@@ -1371,8 +1440,13 @@ end
 local function toggleVoidSafety(state)
 	if state then
 		enableVoidFloor()
+		-- Auto-activate Anti-Grab on void safety startup
+		setAntiGrabUI(true)
+		toggleAntiGrab(true)
 	else
 		disableVoidFloor()
+		setAntiGrabUI(false)
+		toggleAntiGrab(false)
 	end
 end
 local _, setVoidSafetyUI = createToggle("VoidSafety", "Void Safety Platform", toggleVoidSafety)
@@ -1576,6 +1650,7 @@ close.Activated:Connect(function()
 	if annoyPart then annoyPart:Destroy() end
 	if handWeld then handWeld:Destroy() end
 	if grabConnection then grabConnection:Disconnect() end
+	if descConnection then descConnection:Disconnect() end
 	if charAddedConnection then charAddedConnection:Disconnect() end
 	if weldConnection then weldConnection:Disconnect() end
 	if avoidTargetConnection then avoidTargetConnection:Disconnect() end
