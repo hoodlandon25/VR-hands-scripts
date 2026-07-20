@@ -1,0 +1,59 @@
+-- Void Height Tracker Tool
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local lastY = 0
+local isFalling = false
+local connection = nil
+
+local function onHeartbeat()
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+	if hrp then
+		lastY = hrp.Position.Y
+		-- Monitor if the character is currently falling
+		if hrp.AssemblyLinearVelocity.Y < -5 then
+			isFalling = true
+		else
+			isFalling = false
+		end
+
+		-- Standard health death detection
+		if hum and hum.Health <= 0 then
+			connection:Disconnect()
+			local deathHeight = math.round(lastY * 10) / 10
+			if setclipboard then
+				setclipboard(tostring(deathHeight))
+			end
+			game:GetService("StarterGui"):SetCore("SendNotification", {
+				Title = "Void Tracker",
+				Text = "Died at Y: " .. tostring(deathHeight) .. " (Copied!)",
+				Duration = 8
+			})
+		end
+	else
+		-- Handle hard deletion when hitting the FallenPartsDestroyHeight
+		if isFalling then
+			connection:Disconnect()
+			local deathHeight = math.round(lastY * 10) / 10
+			if setclipboard then
+				setclipboard(tostring(deathHeight))
+			end
+			game:GetService("StarterGui"):SetCore("SendNotification", {
+				Title = "Void Tracker",
+				Text = "Void boundary detected at Y: " .. tostring(deathHeight) .. " (Copied!)",
+				Duration = 8
+			})
+		end
+	end
+end
+
+connection = RunService.Heartbeat:Connect(onHeartbeat)
+
+player.CharacterAdded:Connect(function()
+	task.wait(1)
+	if connection then connection:Disconnect() end
+	connection = RunService.Heartbeat:Connect(onHeartbeat)
+end)
