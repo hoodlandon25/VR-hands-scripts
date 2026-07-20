@@ -102,7 +102,8 @@ TargetSection.Size = UDim2.new(1, 0, 0, 60)
 
 vrName.Name = "vrName"
 vrName.Parent = TargetSection
-vrName.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+vrName.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+vrName.BackgroundTransparency = 1.000
 vrName.BorderSizePixel = 0
 vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
 vrName.Size = UDim2.new(0, 290, 0, 36)
@@ -1136,7 +1137,6 @@ local function enableAirWalk(setMainToggleUI)
 	posCorner.CornerRadius = UDim.new(0, 4)
 	posCorner.Parent = posBtn
 
-	local posIndex = 2 -- Default Top-Right
 	local positions = {
 		UDim2.new(0, 15, 0, 15),     -- TL
 		UDim2.new(1, -125, 0, 15),   -- TR
@@ -1285,10 +1285,12 @@ local function enableVoidFloor()
 	
 	-- Spawns the floor at a safe altitude above custom server-side void kill scripts
 	local safeY = -75
+	local thickness = 40
+	local centerY = safeY - (thickness / 2) -- Center of 40-stud deep platform is Y = -95
 	
 	voidFloorPart = Instance.new("Part")
 	voidFloorPart.Name = "NovolineVoidSafetyFloor"
-	voidFloorPart.Size = Vector3.new(200, 5, 200) -- Clean 200x200 foot area
+	voidFloorPart.Size = Vector3.new(300, thickness, 300) -- Clean 300x300 foot area, 40 studs deep (clipping bypass)
 	voidFloorPart.Material = Enum.Material.Glass
 	voidFloorPart.Color = Color3.fromRGB(0, 100, 200)
 	voidFloorPart.Transparency = 0.7
@@ -1302,7 +1304,7 @@ local function enableVoidFloor()
 		local char = Players.LocalPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		if hrp and voidFloorPart then
-			voidFloorPart.CFrame = CFrame.new(hrp.Position.X, safeY, hrp.Position.Z)
+			voidFloorPart.CFrame = CFrame.new(hrp.Position.X, centerY, hrp.Position.Z)
 		end
 	end)
 
@@ -1327,14 +1329,21 @@ local function enableVoidFloor()
 		if isRewinding then return end
 		local char = Players.LocalPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-		if hrp then
-			-- Triggers just above the platform (platform is at -75)
+		if hrp and hum then
+			-- Triggers just above the platform (top of platform is at -75)
 			if hrp.Position.Y <= -72 then
 				isRewinding = true
 
+				-- Instantly try to unragdoll them and pop them up slightly
+				hum.PlatformStand = false
+				hum.Sit = false
+				hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+				hrp.AssemblyLinearVelocity = Vector3.new(0, 15, 0) -- Gentle upward nudge to recover state
+
 				-- Let the character land on the platform briefly so the drop is visually registered
-				task.wait(0.4)
+				task.wait(0.45)
 
 				if hrp and hrp.Parent then
 					-- Freeze character physics instantly to eliminate any potential fling forces/desync
