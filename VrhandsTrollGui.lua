@@ -842,11 +842,7 @@ end
 createToggle("NoclipHands", "Noclip VR Hands", toggleNoclipHands)
 
 -- 4. Weld to Hand (Physics Constraint-Based FE Weld) Handler
-local localAttachment = nil
-local targetAttachment = nil
-local alignPos = nil
-local alignRot = nil
-
+local weldConnection = nil
 local function toggleFEWeld(state)
 	local char = Players.LocalPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -857,46 +853,25 @@ local function toggleFEWeld(state)
 		local handPart = getVRHandPart(targetPlayer)
 
 		if handPart and hrp and hum then
-			if alignPos then alignPos:Destroy() end
-			if alignRot then alignRot:Destroy() end
-			if localAttachment then localAttachment:Destroy() end
-			if targetAttachment then targetAttachment:Destroy() end
-
-			localAttachment = Instance.new("Attachment")
-			localAttachment.Name = "NovolineWeldLocal"
-			localAttachment.Parent = hrp
-
-			targetAttachment = Instance.new("Attachment")
-			targetAttachment.Name = "NovolineWeldTarget"
-			targetAttachment.Parent = handPart
-
-			alignPos = Instance.new("AlignPosition")
-			alignPos.Name = "NovolineAlignPos"
-			alignPos.Mode = Enum.PositionAlignmentMode.TwoAttachment
-			alignPos.Attachment0 = localAttachment
-			alignPos.Attachment1 = targetAttachment
-			alignPos.MaxForce = 10000000
-			alignPos.Responsiveness = 200
-			alignPos.Parent = hrp
-
-			alignRot = Instance.new("AlignOrientation")
-			alignRot.Name = "NovolineAlignRot"
-			alignRot.Mode = Enum.OrientationAlignmentMode.TwoAttachment
-			alignRot.Attachment0 = localAttachment
-			alignRot.Attachment1 = targetAttachment
-			alignRot.MaxTorque = 10000000
-			alignRot.Responsiveness = 200
-			alignRot.Parent = hrp
-
+			-- Direct CFrame placement + Velocity extrapolation matching for minimal replication delay on VR view
 			hum.PlatformStand = true
+
+			if weldConnection then weldConnection:Disconnect() end
+			weldConnection = RunService.Heartbeat:Connect(function()
+				if handPart and handPart.Parent and hrp and char and char.Parent then
+					hrp.CFrame = handPart.CFrame
+					hrp.AssemblyLinearVelocity = handPart.AssemblyLinearVelocity
+					hrp.AssemblyAngularVelocity = handPart.AssemblyAngularVelocity
+				else
+					setWeldUI(false)
+					toggleFEWeld(false)
+				end
+			end)
 		else
 			setWeldUI(false)
 		end
 	else
-		if alignPos then alignPos:Destroy() alignPos = nil end
-		if alignRot then alignRot:Destroy() alignRot = nil end
-		if localAttachment then localAttachment:Destroy() localAttachment = nil end
-		if targetAttachment then targetAttachment:Destroy() targetAttachment = nil end
+		if weldConnection then weldConnection:Disconnect() weldConnection = nil end
 		if hum then hum.PlatformStand = false end
 	end
 end
