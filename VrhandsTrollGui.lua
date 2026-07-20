@@ -130,6 +130,10 @@ refreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 refreshBtn.TextSize = 14.000
 refreshBtn.Active = true
 
+local refreshCorner = Instance.new("UICorner")
+refreshCorner.CornerRadius = UDim.new(0, 6)
+refreshCorner.Parent = refreshBtn
+
 -- Player Search Dropdown
 dropdown.Name = "PlayerDropdown"
 dropdown.Parent = MainFrame
@@ -316,6 +320,20 @@ local function getClosestHandPart(handModel, characterHrp)
 		end
 	end
 	return closestPart, minDistance
+end
+
+-- Resets your character's collisions and touch triggers back to default
+local function restoreCharacterCollisions()
+	local char = Players.LocalPlayer.Character
+	if not char then return end
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			if part.Name ~= "HumanoidRootPart" then
+				part.CanCollide = true
+			end
+			part.CanTouch = true
+		end
+	end
 end
 
 -- Dropdown Logic
@@ -657,7 +675,7 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 	end
 end)
 
--- 5. Avoid Target Hand Handler (Forcefield Snap Mode)
+-- 5. Avoid Target Hand Handler (Forcefield Snap Mode + Ghost Bypass)
 local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
@@ -687,17 +705,30 @@ local function handleAvoidTarget()
 			if rh then table.insert(handModels, rh) end
 		end
 
+		local insideDangerZone = false
+
 		for _, handModel in ipairs(handModels) do
 			local closestPart, dist = getClosestHandPart(handModel, hrp)
 			if closestPart and dist < AVOID_DISTANCE then
+				insideDangerZone = true
 				local dir = (hrp.Position - closestPart.Position)
 				local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 				if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
 				
-				-- Instant boundary snap keeps you cleanly outside of grab reach instantly
+				-- Instant boundary snap + high velocity boost to bypass server interpolation lag
 				local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
 				hrp.CFrame = CFrame.new(safePos)
-				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				hrp.AssemblyLinearVelocity = pushDir * 180 -- Instant replication vector
+			end
+		end
+
+		-- Activates ghost-mode while in the threat area so grab touched-triggers fail to connect
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") then
+				if part.Name ~= "HumanoidRootPart" then
+					part.CanCollide = not insideDangerZone
+				end
+				part.CanTouch = not insideDangerZone
 			end
 		end
 	end
@@ -710,10 +741,11 @@ createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 		avoidTargetConnection = RunService.RenderStepped:Connect(handleAvoidTarget)
 	else
 		if avoidTargetConnection then avoidTargetConnection:Disconnect() avoidTargetConnection = nil end
+		restoreCharacterCollisions()
 	end
 end)
 
--- 6. Avoid All Hands Handler (Forcefield Snap Mode)
+-- 6. Avoid All Hands Handler (Forcefield Snap Mode + Ghost Bypass)
 local avoidAllEnabled = false
 local avoidAllConnection = nil
 
@@ -745,16 +777,29 @@ local function handleAvoidAll()
 		end
 	end
 
+	local insideDangerZone = false
+
 	for _, handModel in ipairs(handModels) do
 		local closestPart, dist = getClosestHandPart(handModel, hrp)
 		if closestPart and dist < AVOID_DISTANCE then
+			insideDangerZone = true
 			local dir = (hrp.Position - closestPart.Position)
 			local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 			if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
 			
 			local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
 			hrp.CFrame = CFrame.new(safePos)
-			hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+			hrp.AssemblyLinearVelocity = pushDir * 180
+		end
+	end
+
+	-- Activates ghost-mode while in the threat area so grab touched-triggers fail to connect
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			if part.Name ~= "HumanoidRootPart" then
+				part.CanCollide = not insideDangerZone
+			end
+			part.CanTouch = not insideDangerZone
 		end
 	end
 end
@@ -766,6 +811,7 @@ createToggle("AvoidAll", "Avoid All VR Players' Hands", function(state)
 		avoidAllConnection = RunService.RenderStepped:Connect(handleAvoidAll)
 	else
 		if avoidAllConnection then avoidAllConnection:Disconnect() avoidAllConnection = nil end
+		restoreCharacterCollisions()
 	end
 end)
 
@@ -1068,5 +1114,6 @@ close.Activated:Connect(function()
 	if hum then hum.PlatformStand = false end
 
 	disableAirWalk()
+	restoreCharacterCollisions()
 	bryh:Destroy()
 end)
