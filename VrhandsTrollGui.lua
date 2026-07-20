@@ -7,6 +7,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 -- Configuration
 local AVOID_DISTANCE = 30 -- Safe distance barrier (in studs)
 local SAFE_DISTANCE = 32 -- Repel snap boundary
+local ROBLOX_STAFF_GROUPS = {1200769, 3055661, 14593111, 12513722, 10279336, 6821794, 3253689}
+local GAME_GROUP_ID = 6336 -- Mad Vikings Production Group ID
 
 local bryh = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -100,8 +102,7 @@ TargetSection.Size = UDim2.new(1, 0, 0, 60)
 
 vrName.Name = "vrName"
 vrName.Parent = TargetSection
-vrName.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-vrName.BackgroundTransparency = 1.000
+vrName.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 vrName.BorderSizePixel = 0
 vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
 vrName.Size = UDim2.new(0, 290, 0, 36)
@@ -179,6 +180,107 @@ local toggleListLayout = Instance.new("UIListLayout")
 toggleListLayout.Parent = TogglesContainer
 toggleListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 toggleListLayout.Padding = UDim.new(0, 6)
+
+-- Subtitle Panel Setup (Used for alert text visualization)
+local SubtitleFrame = Instance.new("Frame")
+local SubtitleLabel = Instance.new("TextLabel")
+
+SubtitleFrame.Name = "SubtitleFrame"
+SubtitleFrame.Parent = bryh
+SubtitleFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+SubtitleFrame.BackgroundTransparency = 0.4
+SubtitleFrame.BorderSizePixel = 0
+SubtitleFrame.Position = UDim2.new(0.5, -250, 1, -100)
+SubtitleFrame.Size = UDim2.new(0, 500, 0, 60)
+SubtitleFrame.Visible = false
+SubtitleFrame.ZIndex = 150
+
+local subCorner = Instance.new("UICorner")
+subCorner.CornerRadius = UDim.new(0, 6)
+subCorner.Parent = SubtitleFrame
+
+local subStroke = Instance.new("UIStroke")
+subStroke.Color = Color3.fromRGB(255, 50, 50)
+subStroke.Thickness = 1
+subStroke.Parent = SubtitleFrame
+
+SubtitleLabel.Name = "SubtitleLabel"
+SubtitleLabel.Parent = SubtitleFrame
+SubtitleLabel.BackgroundTransparency = 1
+SubtitleLabel.Size = UDim2.new(1, -16, 1, -16)
+SubtitleLabel.Position = UDim2.new(0, 8, 0, 8)
+SubtitleLabel.Font = Enum.Font.GothamMedium
+SubtitleLabel.Text = ""
+SubtitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+SubtitleLabel.TextSize = 13
+SubtitleLabel.TextWrapped = true
+
+-- Spectate Menu Setup
+local SpectateFrame = Instance.new("Frame")
+local spectateTitle = Instance.new("TextLabel")
+local firstPersonBtn = Instance.new("TextButton")
+local thirdPersonBtn = Instance.new("TextButton")
+local shiftlockBtn = Instance.new("TextButton")
+local stopSpectateBtn = Instance.new("TextButton")
+
+SpectateFrame.Name = "SpectateFrame"
+SpectateFrame.Parent = bryh
+SpectateFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+SpectateFrame.BorderSizePixel = 0
+SpectateFrame.Position = UDim2.new(0, 15, 0.5, -80)
+SpectateFrame.Size = UDim2.new(0, 130, 0, 160)
+SpectateFrame.Visible = false
+SpectateFrame.ZIndex = 80
+
+local specCorner = Instance.new("UICorner")
+specCorner.CornerRadius = UDim.new(0, 8)
+specCorner.Parent = SpectateFrame
+
+local specStroke = Instance.new("UIStroke")
+specStroke.Color = Color3.fromRGB(0, 180, 255)
+specStroke.Thickness = 1.2
+specStroke.Parent = SpectateFrame
+
+local specLayout = Instance.new("UIListLayout")
+specLayout.Parent = SpectateFrame
+specLayout.SortOrder = Enum.SortOrder.LayoutOrder
+specLayout.Padding = UDim.new(0, 4)
+
+local specPadding = Instance.new("UIPadding")
+specPadding.PaddingTop = UDim.new(0, 6)
+specPadding.PaddingBottom = UDim.new(0, 6)
+specPadding.PaddingLeft = UDim.new(0, 6)
+specPadding.PaddingRight = UDim.new(0, 6)
+specPadding.Parent = SpectateFrame
+
+spectateTitle.Name = "Title"
+spectateTitle.Parent = SpectateFrame
+spectateTitle.BackgroundTransparency = 1
+spectateTitle.Size = UDim2.new(1, 0, 0, 20)
+spectateTitle.Font = Enum.Font.GothamBold
+spectateTitle.Text = "SPECTATE"
+spectateTitle.TextColor3 = Color3.fromRGB(0, 180, 255)
+spectateTitle.TextSize = 11
+
+local function styleSpecBtn(btn, text)
+	btn.Size = UDim2.new(1, 0, 0, 24)
+	btn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+	btn.Font = Enum.Font.GothamBold
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+	btn.TextSize = 10
+	btn.Parent = SpectateFrame
+	btn.Active = true
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 4)
+	c.Parent = btn
+end
+
+styleSpecBtn(firstPersonBtn, "1st Person")
+styleSpecBtn(thirdPersonBtn, "3rd Person")
+styleSpecBtn(shiftlockBtn, "Shiftlock: OFF")
+styleSpecBtn(stopSpectateBtn, "❌ STOP")
+stopSpectateBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
 
 -- Dragging GUI Connection
 local dragging, dragInput, dragStart, startPos
@@ -403,6 +505,16 @@ UserInputService.InputBegan:Connect(function(input)
 	end
 end)
 
+-- Track all toggles globally to force-shutdown on admin detection
+local activeFeatures = {}
+
+local function disableAllFeatures()
+	for name, feature in pairs(activeFeatures) do
+		feature.setter(false)
+		feature.callback(false)
+	end
+end
+
 -- Reusable Toggle Factory Component
 local function createToggle(name, text, onClickCallback)
 	local frame = Instance.new("Frame")
@@ -475,6 +587,7 @@ local function createToggle(name, text, onClickCallback)
 		end
 	end
 
+	activeFeatures[name] = { setter = setUIState, callback = onClickCallback }
 	return frame, setUIState
 end
 
@@ -557,7 +670,7 @@ local annoying = false
 local annoyConnection = nil
 local annoyPart = nil
 
-local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", function(state)
+local function toggleAnnoy(state)
 	if state then
 		local targetPlayer = getActiveTarget()
 		local realHead = getVRHeadPart(targetPlayer)
@@ -601,48 +714,11 @@ local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", function(stat
 		if annoyConnection then annoyConnection:Disconnect() annoyConnection = nil end
 		if annoyPart then annoyPart:Destroy() annoyPart = nil end
 	end
-end)
+end
+local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", toggleAnnoy)
 
 -- 2. Anti Grab (LetMeGo method) Handler
-local grabConnection = nil
-local charAddedConnection = nil
-
-local pinchRemote = ReplicatedStorage:WaitForChild("COM", 5)
-if pinchRemote then
-	pinchRemote = pinchRemote:WaitForChild("Pinch", 5)
-	if pinchRemote then
-		pinchRemote = pinchRemote:WaitForChild("LetMeGo", 5)
-	end
-end
-
-local function checkAndRelease(character)
-	if antiGrabEnabled and character and character:GetAttribute("Grabbed") then
-		if pinchRemote then pinchRemote:FireServer() end
-		-- Destroys existing welds to prevent dragging
-		for _, part in ipairs(character:GetChildren()) do
-			if part:IsA("BasePart") then
-				for _, joint in ipairs(part:GetJoints()) do
-					local otherPart = (joint.Part0 == part) and joint.Part1 or joint.Part0
-					if otherPart and not otherPart:IsDescendantOf(character) then
-						joint:Destroy()
-					end
-				end
-			end
-		end
-	end
-end
-
-local function setupCharConnections(character)
-	if grabConnection then grabConnection:Disconnect() grabConnection = nil end
-	if not character then return end
-	
-	checkAndRelease(character)
-	grabConnection = character:GetAttributeChangedSignal("Grabbed"):Connect(function()
-		checkAndRelease(character)
-	end)
-end
-
-createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", function(state)
+local function toggleAntiGrab(state)
 	antiGrabEnabled = state
 	updateTouchInterestDestroyerState()
 	if state then
@@ -660,11 +736,12 @@ createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", function(state)
 		if charAddedConnection then charAddedConnection:Disconnect() charAddedConnection = nil end
 		restoreCharacterCollisions()
 	end
-end)
+end
+createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", toggleAntiGrab)
 
 -- 3. Noclip VR Hands Handler
 local nocliphand = false
-createToggle("NoclipHands", "Noclip VR Hands", function(state)
+local function toggleNoclipHands(state)
 	nocliphand = state
 	
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
@@ -693,7 +770,8 @@ createToggle("NoclipHands", "Noclip VR Hands", function(state)
 			end
 		end
 	end
-end)
+end
+createToggle("NoclipHands", "Noclip VR Hands", toggleNoclipHands)
 
 -- 4. Weld to Hand (Physics Constraint-Based FE Weld) Handler
 local localAttachment = nil
@@ -701,7 +779,7 @@ local targetAttachment = nil
 local alignPos = nil
 local alignRot = nil
 
-local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(state)
+local function toggleFEWeld(state)
 	local char = Players.LocalPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -753,7 +831,8 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 		if targetAttachment then targetAttachment:Destroy() targetAttachment = nil end
 		if hum then hum.PlatformStand = false end
 	end
-end)
+end
+local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", toggleFEWeld)
 
 -- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
 local avoidTargetConnection = nil
@@ -813,7 +892,7 @@ local function handleAvoidTarget()
 	end
 end
 
-createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
+local function toggleAvoidTarget(state)
 	avoidTargetEnabled = state
 	updateTouchInterestDestroyerState()
 	if state then
@@ -823,7 +902,8 @@ createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 		if avoidTargetConnection then avoidTargetConnection:Disconnect() avoidTargetConnection = nil end
 		restoreCharacterCollisions()
 	end
-end)
+end
+createToggle("AvoidTarget", "Avoid Target VR Player's Hand", toggleAvoidTarget)
 
 -- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
 local avoidAllConnection = nil
@@ -883,7 +963,7 @@ local function handleAvoidAll()
 	end
 end
 
-createToggle("AvoidAll", "Avoid All VR Players' Hands", function(state)
+local function toggleAvoidAll(state)
 	avoidAllEnabled = state
 	updateTouchInterestDestroyerState()
 	if state then
@@ -893,11 +973,12 @@ createToggle("AvoidAll", "Avoid All VR Players' Hands", function(state)
 		if avoidAllConnection then avoidAllConnection:Disconnect() avoidAllConnection = nil end
 		restoreCharacterCollisions()
 	end
-end)
+end
+createToggle("AvoidAll", "Avoid All VR Players' Hands", toggleAvoidAll)
 
 -- 7. Remove Props Handler
 local removedprops = false
-createToggle("RemProps", "Remove Game Props", function(state)
+local function toggleRemProps(state)
 	removedprops = state
 	if removedprops then
 		local props = workspace:FindFirstChild("Props")
@@ -906,11 +987,12 @@ createToggle("RemProps", "Remove Game Props", function(state)
 		local props = Lighting:FindFirstChild("Props")
 		if props then props.Parent = workspace end
 	end
-end)
+end
+createToggle("RemProps", "Remove Game Props", toggleRemProps)
 
 -- 8. Noclip Props Handler
 local propnoclip = false
-createToggle("NoclipProps", "Noclip Game Props", function(state)
+local function toggleNoclipProps(state)
 	propnoclip = state
 	local props = workspace:FindFirstChild("Props")
 	if props then
@@ -918,11 +1000,12 @@ createToggle("NoclipProps", "Noclip Game Props", function(state)
 			if item:IsA("BasePart") then item.CanCollide = not propnoclip end
 		end
 	end
-end)
+end
+createToggle("NoclipProps", "Noclip Game Props", toggleNoclipProps)
 
 -- 9. Noclip Heads Handler
 local headnoclip = false
-createToggle("NoclipHeads", "Noclip VR Heads", function(state)
+local function toggleNoclipHeads(state)
 	headnoclip = state
 	
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
@@ -947,11 +1030,12 @@ createToggle("NoclipHeads", "Noclip VR Heads", function(state)
 			end
 		end
 	end
-end)
+end
+createToggle("NoclipHeads", "Noclip VR Heads", toggleNoclipHeads)
 
 -- 10. Disable Pickup Handler (Humanoid Rename Fallback)
 local pickup = true
-createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", function(state)
+local function toggleRenameHumanoid(state)
 	local localChar = Players.LocalPlayer.Character
 	if not localChar then return end
 	pickup = not state
@@ -963,7 +1047,8 @@ createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", function(state)
 		local hum = localChar:FindFirstChild("lol")
 		if hum then hum.Name = "Humanoid" end
 	end
-end)
+end
+createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", toggleRenameHumanoid)
 
 -- 11. FE Air-Walk Handler (Pop-up Sub-GUI Feature)
 local airWalkEnabled = false
@@ -1051,6 +1136,7 @@ local function enableAirWalk(setMainToggleUI)
 	posCorner.CornerRadius = UDim.new(0, 4)
 	posCorner.Parent = posBtn
 
+	local posIndex = 2 -- Default Top-Right
 	local positions = {
 		UDim2.new(0, 15, 0, 15),     -- TL
 		UDim2.new(1, -125, 0, 15),   -- TR
@@ -1164,30 +1250,40 @@ local function enableAirWalk(setMainToggleUI)
 	end)
 end
 
-local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", function(state)
+local function toggleAirWalk(state)
 	if state then
 		enableAirWalk(setAirWalkUI)
 	else
 		disableAirWalk()
 	end
-end)
+end
+local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", toggleAirWalk)
 
--- 12. Void Safety Platform Handler (Anti Void Death)
+-- 12. Void Safety Platform Handler (Anti Void Death + FE Rewind Logic)
 local voidFloorPart = nil
 local voidFloorEnabled = false
 local voidFloorConnection = nil
+local safePositionConnection = nil
+local heightMonitorConnection = nil
+
+local lastSafeCFrame = nil
+local isRewinding = false
 
 local function disableVoidFloor()
 	if voidFloorConnection then voidFloorConnection:Disconnect() voidFloorConnection = nil end
+	if safePositionConnection then safePositionConnection:Disconnect() safePositionConnection = nil end
+	if heightMonitorConnection then heightMonitorConnection:Disconnect() heightMonitorConnection = nil end
 	if voidFloorPart then voidFloorPart:Destroy() voidFloorPart = nil end
 	voidFloorEnabled = false
+	isRewinding = false
 end
 
 local function enableVoidFloor()
 	voidFloorEnabled = true
+	isRewinding = false
 	if voidFloorPart then voidFloorPart:Destroy() end
 	
-	-- Placed safely at -75 studs to capture character completely above the detected -105.6 server death barrier
+	-- Spawns the floor at a safe altitude above custom server-side void kill scripts
 	local safeY = -75
 	
 	voidFloorPart = Instance.new("Part")
@@ -1209,14 +1305,260 @@ local function enableVoidFloor()
 			voidFloorPart.CFrame = CFrame.new(hrp.Position.X, safeY, hrp.Position.Z)
 		end
 	end)
+
+	-- Safe Position Tracker Loop: Remembers the last coordinate on solid ground (Y > -20)
+	if safePositionConnection then safePositionConnection:Disconnect() end
+	safePositionConnection = RunService.Heartbeat:Connect(function()
+		local char = Players.LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+		if hrp and hum and not isRewinding then
+			-- Verify the player is safely standing on a valid material above the void
+			if hrp.Position.Y > -20 and hum.FloorMaterial ~= nil and hum.FloorMaterial ~= Enum.CellMaterial.Empty then
+				lastSafeCFrame = hrp.CFrame
+			end
+		end
+	end)
+
+	-- Height Monitor Loop: Triggers the glitch-back-up/rewind sequence when player falls near the safety floor
+	if heightMonitorConnection then heightMonitorConnection:Disconnect() end
+	heightMonitorConnection = RunService.Heartbeat:Connect(function()
+		if isRewinding then return end
+		local char = Players.LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+		if hrp then
+			-- Triggers just above the platform (platform is at -75)
+			if hrp.Position.Y <= -72 then
+				isRewinding = true
+
+				-- Let the character land on the platform briefly so the drop is visually registered
+				task.wait(0.4)
+
+				if hrp and hrp.Parent then
+					-- Freeze character physics instantly to eliminate any potential fling forces/desync
+					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+
+					-- Snap/Glitch back up safely to the last recorded ground coordinate
+					hrp.CFrame = lastSafeCFrame or CFrame.new(0, 15, 0)
+
+					-- Re-apply a brief physics freeze to stabilize the character after CFrame snap
+					task.wait(0.1)
+					if hrp and hrp.Parent then
+						hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+						hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+					end
+				end
+
+				task.wait(0.2)
+				isRewinding = false
+			end
+		end
+	end)
 end
 
-createToggle("VoidSafety", "Void Safety Platform", function(state)
+local function toggleVoidSafety(state)
 	if state then
 		enableVoidFloor()
 	else
 		disableVoidFloor()
 	end
+end
+local _, setVoidSafetyUI = createToggle("VoidSafety", "Void Safety Platform", toggleVoidSafety)
+
+-- ==========================================================
+-- Camera Spectate Functionality
+-- ==========================================================
+local spectatingTarget = nil
+local spectateMode = "None"
+local isShiftlock = false
+local spectateConnection = nil
+
+local function stopSpectating()
+	spectateMode = "None"
+	isShiftlock = false
+	SpectateFrame.Visible = false
+	shiftlockBtn.Text = "Shiftlock: OFF"
+	shiftlockBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+	
+	local char = Players.LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	
+	workspace.CurrentCamera.CameraSubject = hum
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+	Players.LocalPlayer.CameraMaxZoomDistance = 400
+	Players.LocalPlayer.CameraMinZoomDistance = 0.5
+	
+	if hum then
+		hum.CameraOffset = Vector3.new(0, 0, 0)
+	end
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	
+	if spectateConnection then
+		spectateConnection:Disconnect()
+		spectateConnection = nil
+	end
+end
+
+local function startSpectating(targetPlayer, mode)
+	if not targetPlayer or not targetPlayer.Character then return end
+	local targetHum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+	if not targetHum then return end
+
+	spectatingTarget = targetPlayer
+	spectateMode = mode
+	SpectateFrame.Visible = true
+
+	workspace.CurrentCamera.CameraSubject = targetHum
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+
+	if mode == "FirstPerson" then
+		Players.LocalPlayer.CameraMaxZoomDistance = 0.5
+		Players.LocalPlayer.CameraMinZoomDistance = 0.5
+	elseif mode == "ThirdPerson" then
+		Players.LocalPlayer.CameraMaxZoomDistance = 30
+		Players.LocalPlayer.CameraMinZoomDistance = 10
+	end
+
+	if spectateConnection then spectateConnection:Disconnect() end
+	spectateConnection = RunService.RenderStepped:Connect(function()
+		if not targetPlayer or not targetPlayer.Parent or not targetPlayer.Character then
+			stopSpectating()
+			return
+		end
+		local currentTargetHum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if not currentTargetHum then
+			stopSpectating()
+			return
+		end
+
+		workspace.CurrentCamera.CameraSubject = currentTargetHum
+
+		if spectateMode == "ThirdPerson" and isShiftlock then
+			currentTargetHum.CameraOffset = Vector3.new(1.75, 0, 0)
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		else
+			currentTargetHum.CameraOffset = Vector3.new(0, 0, 0)
+			if spectateMode == "ThirdPerson" then
+				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			end
+		end
+	end)
+end
+
+-- Connect Spectate GUI Buttons
+firstPersonBtn.Activated:Connect(function()
+	if spectatingTarget then
+		startSpectating(spectatingTarget, "FirstPerson")
+	end
+end)
+
+thirdPersonBtn.Activated:Connect(function()
+	if spectatingTarget then
+		startSpectating(spectatingTarget, "ThirdPerson")
+	end
+end)
+
+shiftlockBtn.Activated:Connect(function()
+	if spectateMode == "ThirdPerson" then
+		isShiftlock = not isShiftlock
+		if isShiftlock then
+			shiftlockBtn.Text = "Shiftlock: ON"
+			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
+		else
+			shiftlockBtn.Text = "Shiftlock: OFF"
+			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+		end
+	end
+end)
+
+stopSpectateBtn.Activated:Connect(stopSpectating)
+
+-- ==========================================================
+-- Subtitle Warning Animation
+-- ==========================================================
+local function playSubtitleAlert(text)
+	SubtitleFrame.Visible = true
+	SubtitleLabel.Text = ""
+
+	-- Play a sound to alert player of admin
+	pcall(function()
+		local s = Instance.new("Sound", workspace)
+		s.SoundId = "rbxassetid://156826628" -- High tech alarm beep
+		s.Volume = 0.8
+		s:Play()
+		task.delay(4, function() s:Destroy() end)
+	end)
+
+	-- Typewriter effect
+	for i = 1, #text do
+		SubtitleLabel.Text = text:sub(1, i)
+		task.wait(0.02)
+	end
+
+	task.wait(5.5)
+	SubtitleFrame.Visible = false
+end
+
+-- ==========================================================
+-- Admin / Mod / Owner Detection Logic
+-- ==========================================================
+local function isStaffMember(p)
+	if p == Players.LocalPlayer then return nil end
+
+	-- 1. Owner Check
+	if p.UserId == game.CreatorId then
+		return "Game Owner"
+	end
+
+	-- 2. Official Roblox Staff Group check
+	for _, gid in ipairs(ROBLOX_STAFF_GROUPS) do
+		local ok, rank = pcall(function() return p:GetRankInGroup(gid) end)
+		if ok and rank and rank >= 1 then
+			return "Roblox Staff"
+		end
+	end
+
+	-- 3. Game Developer Group Check
+	local ok, rank = pcall(function() return p:GetRankInGroup(GAME_GROUP_ID) end)
+	if ok and rank and rank >= 100 then
+		return "Game Moderator/Admin"
+	end
+
+	-- 4. Username keywords check
+	local nameLower = p.Name:lower()
+	local displayLower = p.DisplayName:lower()
+	if nameLower:find("admin") or nameLower:find("moder") or nameLower:find("staff") or displayLower:find("admin") or displayLower:find("moder") or displayLower:find("staff") then
+		return "Suspected Admin/Mod"
+	end
+
+	return nil
+end
+
+local function handlePlayerJoined(p)
+	local staffRole = isStaffMember(p)
+	if staffRole then
+		-- Instantly disable all features for safety
+		disableAllFeatures()
+
+		-- Play subtitle sequence
+		local alertMessage = string.format("[ALERT] %s Detected: %s (@%s) has joined. All features have been auto-disabled for safety.", staffRole, p.DisplayName, p.Name)
+		task.spawn(playSubtitleAlert, alertMessage)
+
+		-- Show spectate option
+		startSpectating(p, "ThirdPerson")
+	end
+end
+
+-- Initialize Player added checks
+for _, p in ipairs(Players:GetPlayers()) do
+	task.spawn(handlePlayerJoined, p)
+end
+Players.PlayerAdded:Connect(function(p)
+	task.wait(0.5) -- wait for rank details to resolve
+	handlePlayerJoined(p)
 end)
 
 -- Close Button Connection Cleanup
@@ -1244,5 +1586,6 @@ close.Activated:Connect(function()
 	stopJointDestroyer()
 	restoreCharacterCollisions()
 	disableVoidFloor()
+	stopSpectating()
 	bryh:Destroy()
 end)
