@@ -5,8 +5,8 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
-local AVOID_DISTANCE = 22 -- Safe distance barrier (in studs)
-local AVOID_PUSH_SPEED = 2.0
+local AVOID_DISTANCE = 30 -- Increased safe zone boundary (in studs)
+local SAFE_DISTANCE = 32 -- Repel snap boundary
 
 local bryh = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -169,7 +169,7 @@ TogglesContainer.BackgroundTransparency = 1.000
 TogglesContainer.BorderSizePixel = 0
 TogglesContainer.Position = UDim2.new(0, 10, 0, 105)
 TogglesContainer.Size = UDim2.new(1, -20, 1, -115)
-TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 620) -- Expanded canvas size to fit all 12 options
+TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 620)
 TogglesContainer.ScrollBarThickness = 4
 TogglesContainer.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
 TogglesContainer.ScrollBarImageTransparency = 0.6
@@ -504,12 +504,50 @@ local function stopTouchInterestDestroyer()
 	end
 end
 
--- Updates the touchinterest destroyer depending on active features
+-- Activates / Deactivates the touchinterest loop depending on toggled actions
 local function updateTouchInterestDestroyerState()
 	if antiGrabEnabled or avoidTargetEnabled or avoidAllEnabled then
 		startTouchInterestDestroyer()
 	else
 		stopTouchInterestDestroyer()
+	end
+end
+
+-- Client-Side Joint Destroyer (instantly cuts grabs by deleting target welds before they desync)
+local jointConnection = nil
+local function startJointDestroyer()
+	if jointConnection then return end
+	jointConnection = RunService.Heartbeat:Connect(function()
+		local char = Players.LocalPlayer.Character
+		if char then
+			for _, part in ipairs(char:GetChildren()) do
+				if part:IsA("BasePart") then
+					-- Scan legacy joints (Weld, Motor6D, etc.)
+					for _, joint in ipairs(part:GetJoints()) do
+						local otherPart = (joint.Part0 == part) and joint.Part1 or joint.Part0
+						if otherPart and not otherPart:IsDescendantOf(char) then
+							joint:Destroy()
+						end
+					end
+					-- Scan WeldConstraints
+					for _, child in ipairs(part:GetChildren()) do
+						if child:IsA("WeldConstraint") then
+							local otherPart = (child.Part0 == part) and child.Part1 or child.Part0
+							if otherPart and not otherPart:IsDescendantOf(char) then
+								child:Destroy()
+							end
+						end
+					end
+				end
+			end
+		end
+	end)
+end
+
+local function stopJointDestroyer()
+	if jointConnection then
+		jointConnection:Disconnect()
+		jointConnection = nil
 	end
 end
 
@@ -565,6 +603,7 @@ local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", function(stat
 end)
 
 -- 2. Anti Grab (LetMeGo method) Handler
+local antiGrabEnabled = false
 local grabConnection = nil
 local charAddedConnection = nil
 
@@ -579,6 +618,17 @@ end
 local function checkAndRelease(character)
 	if antiGrabEnabled and character and character:GetAttribute("Grabbed") then
 		if pinchRemote then pinchRemote:FireServer() end
+		-- Destroys existing welds to prevent dragging
+		for _, part in ipairs(character:GetChildren()) do
+			if part:IsA("BasePart") then
+				for _, joint in ipairs(part:GetJoints()) do
+					local otherPart = (joint.Part0 == part) and joint.Part1 or joint.Part0
+					if otherPart and not otherPart:IsDescendantOf(character) then
+						joint:Destroy()
+					end
+				end
+			end
+		end
 	end
 end
 
@@ -598,12 +648,14 @@ createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", function(state)
 	if state then
 		local char = Players.LocalPlayer.Character
 		setupCharConnections(char)
+		startJointDestroyer() -- Launches background joint cutter
 		if not charAddedConnection then
 			charAddedConnection = Players.LocalPlayer.CharacterAdded:Connect(function(chara)
 				setupCharConnections(chara)
 			end)
 		end
 	else
+		stopJointDestroyer()
 		if grabConnection then grabConnection:Disconnect() grabConnection = nil end
 		if charAddedConnection then charAddedConnection:Disconnect() charAddedConnection = nil end
 		restoreCharacterCollisions()
@@ -703,7 +755,8 @@ local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", function(sta
 	end
 end)
 
--- 5. Avoid Target Hand Handler (Forcefield Snap Mode + Ghost Bypass + Fling Prevention)
+-- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
+local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
 local function handleAvoidTarget()
@@ -742,17 +795,10 @@ local function handleAvoidTarget()
 				local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 				if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
 				
-				-- Instant boundary snap + high velocity boost to bypass server interpolation lag
-				local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
+				-- Snaps your character out of range immediately. Linear velocity is reset to 0 to prevent flinging
+				local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * SAFE_DISTANCE)
 				hrp.CFrame = CFrame.new(safePos)
-				
-				-- Check grab attribute to prevent fling overlapping forces
-				local isGrabbed = char:GetAttribute("Grabbed")
-				if isGrabbed then
-					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-				else
-					hrp.AssemblyLinearVelocity = pushDir * 80 -- Safer replication speed
-				end
+				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 			end
 		end
 
@@ -780,7 +826,8 @@ createToggle("AvoidTarget", "Avoid Target VR Player's Hand", function(state)
 	end
 end)
 
--- 6. Avoid All Hands Handler (Forcefield Snap Mode + Ghost Bypass + Fling Prevention)
+-- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
+local avoidAllEnabled = false
 local avoidAllConnection = nil
 
 local function handleAvoidAll()
@@ -821,15 +868,9 @@ local function handleAvoidAll()
 			local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 			if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
 			
-			local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * AVOID_DISTANCE)
+			local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * SAFE_DISTANCE)
 			hrp.CFrame = CFrame.new(safePos)
-			
-			local isGrabbed = char:GetAttribute("Grabbed")
-			if isGrabbed then
-				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-			else
-				hrp.AssemblyLinearVelocity = pushDir * 80
-			end
+			hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 
@@ -1143,9 +1184,8 @@ createToggle("VoidSafety", "Void Safety Platform", function(state)
 	if state then
 		if voidFloorPart then voidFloorPart:Destroy() end
 		
-		-- Reads the server's void destruction height and spawns the floor just above it
-		local destroyHeight = workspace.FallenPartsDestroyHeight
-		local safeY = destroyHeight + 20
+		-- Spawns the floor at a safe altitude above custom server-side void kill scripts
+		local safeY = -90
 		
 		voidFloorPart = Instance.new("Part")
 		voidFloorPart.Name = "NovolineVoidSafetyFloor"
@@ -1187,6 +1227,7 @@ close.Activated:Connect(function()
 
 	disableAirWalk()
 	stopTouchInterestDestroyer()
+	stopJointDestroyer()
 	restoreCharacterCollisions()
 	
 	if voidFloorPart then voidFloorPart:Destroy() end
