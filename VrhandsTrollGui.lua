@@ -718,91 +718,59 @@ local function toggleAnnoy(state)
 end
 local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", toggleAnnoy)
 
--- 2. Anti Grab (LetMeGo method) Handler
+-- 2. Anti Grab (Direct user script execution wrapped inside dynamic toggle)
 local antiGrabEnabled = false
-local grabConnection = nil
-local descConnection = nil
-local charAddedConnection = nil
+local antiGrabConnections = {}
 
-local pinchRemote = nil
-pcall(function()
-	pinchRemote = ReplicatedStorage:WaitForChild("COM"):WaitForChild("Pinch"):WaitForChild("LetMeGo")
-end)
-
-local function checkAndRelease(character)
-	if not antiGrabEnabled or not character then return end
-	
-	local isGrabbed = character:GetAttribute("Grabbed")
-	local hasWeld = false
-	
-	for _, part in ipairs(character:GetChildren()) do
-		if part:IsA("BasePart") then
-			for _, joint in ipairs(part:GetJoints()) do
-				local otherPart = (joint.Part0 == part) and joint.Part1 or joint.Part0
-				if otherPart and not otherPart:IsDescendantOf(character) then
-					hasWeld = true
-					joint:Destroy()
-				end
-			end
-			for _, child in ipairs(part:GetChildren()) do
-				if child:IsA("WeldConstraint") then
-					local otherPart = (child.Part0 == part) and child.Part1 or child.Part0
-					if otherPart and not otherPart:IsDescendantOf(character) then
-						hasWeld = true
-						child:Destroy()
-					end
-				end
-			end
-		end
+local function startUserAntiGrab()
+	-- Clean existing connections first to prevent duplicate memory leaks
+	for _, conn in ipairs(antiGrabConnections) do
+		if conn.Connected then conn:Disconnect() end
 	end
+	antiGrabConnections = {}
 
-	if isGrabbed or hasWeld then
-		if pinchRemote then
+	-- ==== YOUR EXACT ANTIGRAB SCRIPT (UNMODIFIED) ====
+	local player = game.Players.LocalPlayer
+	local char = player.Character or player.CharacterAdded:Wait()
+
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local pinchRemote = ReplicatedStorage.COM.Pinch.LetMeGo
+
+	local function onchar()
+		if char:GetAttribute("Grabbed") then
 			pinchRemote:FireServer()
 		end
+
+		local attrConn = char:GetAttributeChangedSignal("Grabbed"):Connect(function()
+			if char:GetAttribute("Grabbed") then
+				pinchRemote:FireServer()
+			end
+		end)
+		table.insert(antiGrabConnections, attrConn)
 	end
+	onchar()
+	
+	local charAddedConn = player.CharacterAdded:Connect(function(chara)
+		char = chara
+		onchar()
+	end)
+	table.insert(antiGrabConnections, charAddedConn)
 end
 
-local function setupCharConnections(character)
-	if grabConnection then grabConnection:Disconnect() grabConnection = nil end
-	if descConnection then descConnection:Disconnect() descConnection = nil end
-	if not character then return end
-	
-	checkAndRelease(character)
-	
-	grabConnection = character:GetAttributeChangedSignal("Grabbed"):Connect(function()
-		checkAndRelease(character)
-	end)
-	
-	descConnection = character.DescendantAdded:Connect(function(desc)
-		if desc:IsA("JointInstance") or desc:IsA("WeldConstraint") then
-			task.wait()
-			checkAndRelease(character)
-		end
-	end)
+local function stopUserAntiGrab()
+	for _, conn in ipairs(antiGrabConnections) do
+		if conn.Connected then conn:Disconnect() end
+	end
+	antiGrabConnections = {}
 end
 
 local function toggleAntiGrab(state)
 	antiGrabEnabled = state
 	updateTouchInterestDestroyerState()
 	if state then
-		local char = Players.LocalPlayer.Character
-		if char then
-			setupCharConnections(char)
-		end
-		startJointDestroyer() -- Launches background joint cutter
-		if not charAddedConnection then
-			charAddedConnection = Players.LocalPlayer.CharacterAdded:Connect(function(chara)
-				task.wait(0.5)
-				setupCharConnections(chara)
-			end)
-		end
+		startUserAntiGrab()
 	else
-		stopJointDestroyer()
-		if grabConnection then grabConnection:Disconnect() grabConnection = nil end
-		if descConnection then descConnection:Disconnect() descConnection = nil end
-		if charAddedConnection then charAddedConnection:Disconnect() charAddedConnection = nil end
-		restoreCharacterCollisions()
+		stopUserAntiGrab()
 	end
 end
 local _, setAntiGrabUI = createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", toggleAntiGrab)
@@ -841,7 +809,7 @@ local function toggleNoclipHands(state)
 end
 createToggle("NoclipHands", "Noclip VR Hands", toggleNoclipHands)
 
--- 4. Weld to Hand (Physics Constraint-Based FE Weld) Handler
+-- 4. Weld to Hand (Direct CFrame + Velocity Extrapolation matching) Handler
 local weldConnection = nil
 local function toggleFEWeld(state)
 	local char = Players.LocalPlayer.Character
@@ -853,12 +821,13 @@ local function toggleFEWeld(state)
 		local handPart = getVRHandPart(targetPlayer)
 
 		if handPart and hrp and hum then
-			-- Direct CFrame placement + Velocity extrapolation matching for minimal replication delay on VR view
+			-- Platform stand keeps Humanoid controller from fighting local positioning
 			hum.PlatformStand = true
 
 			if weldConnection then weldConnection:Disconnect() end
 			weldConnection = RunService.Heartbeat:Connect(function()
 				if handPart and handPart.Parent and hrp and char and char.Parent then
+					-- Matches position, velocity, and angular velocity to synchronize physics replication tightly
 					hrp.CFrame = handPart.CFrame
 					hrp.AssemblyLinearVelocity = handPart.AssemblyLinearVelocity
 					hrp.AssemblyAngularVelocity = handPart.AssemblyAngularVelocity
@@ -878,7 +847,6 @@ end
 local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", toggleFEWeld)
 
 -- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
-local avoidTargetEnabled = false
 local avoidTargetConnection = nil
 
 local function handleAvoidTarget()
@@ -950,7 +918,6 @@ end
 createToggle("AvoidTarget", "Avoid Target VR Player's Hand", toggleAvoidTarget)
 
 -- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
-local avoidAllEnabled = false
 local avoidAllConnection = nil
 
 local function handleAvoidAll()
