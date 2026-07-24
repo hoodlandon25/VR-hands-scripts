@@ -37,11 +37,10 @@ bryh.Parent = game:GetService("CoreGui") or Players.LocalPlayer:WaitForChild("Pl
 bryh.ResetOnSpawn = false
 
 -- ==========================================================
--- Dual-Layer Input Helper (Fixes mobile click-swallowing)
+-- Input Helper (Corrected to prevent double-firing on mobile)
 -- ==========================================================
 local function connectClick(button, callback)
 	button.MouseButton1Click:Connect(callback)
-	button.Activated:Connect(callback)
 end
 
 -- ==========================================================
@@ -190,7 +189,7 @@ MainFrame.BorderSizePixel = 0
 MainFrame.Position = UDim2.new(0.5, -230, 0.5, -170)
 MainFrame.Size = UDim2.new(0, 460, 0, 340)
 MainFrame.ClipsDescendants = true
-MainFrame.Visible = false -- Starts hidden by default (toggle button activates it)
+MainFrame.Visible = false -- Hidden by default on startup (toggle button activates it)
 MainFrame.ZIndex = 1
 
 local mainCorner = Instance.new("UICorner")
@@ -850,6 +849,9 @@ switchTab("Toggles", togglesBtn) -- Startup defaults to toggles page
 -- Feature Functionality & Handlers
 -- ==========================================================
 
+local avoidTargetEnabled = false
+local avoidAllEnabled = false
+
 -- Client-Side TouchInterest Destroyer (prevents fast touch grabbing)
 local touchInterestConnection = nil
 local function startTouchInterestDestroyer()
@@ -953,7 +955,7 @@ local function toggleAnnoy(state)
 
 			annoyConnection = RunService.Heartbeat:Connect(function()
 				if realHead and annoyPart and bp then
-					bp.Position = realHead.Position + realHead.CFrame.LookVector * 15 + realHead.CFrame.RightVector * 2
+					bp.Position = realHead.Position + realHead.Cframe.LookVector * 15 + realHead.Cframe.RightVector * 2
 				else
 					annoying = false
 					setAnnoyUI(false)
@@ -1070,7 +1072,7 @@ local function toggleNoclipHands(state)
 		end
 	end
 end
-setNoclipHandsUI = createToggle("NoclipHands", "Noclip VR Hands", "Exploit", toggleNoclipHands)
+createToggle("NoclipHands", "Noclip VR Hands", "Exploit", toggleNoclipHands)
 
 -- 4. Weld to Hand (Direct CFrame + Velocity Extrapolation matching) Handler
 local weldConnection = nil
@@ -1534,7 +1536,7 @@ local function toggleAirWalk(state)
 		disableAirWalk()
 	end
 end
-local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", "Exploit", toggleAirWalk)
+local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", toggleAirWalk)
 
 -- 12. Void Safety Platform Handler (Anti Void Death + FE Rewind Logic)
 local voidFloorPart = nil
@@ -1672,7 +1674,7 @@ local function stopSpectating()
 	isShiftlock = false
 	SpectateFrame.Visible = false
 	shiftlockBtn.Text = "Shiftlock: OFF"
-	shiftlockBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+	shiftlockBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 	
 	local char = Players.LocalPlayer.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1740,19 +1742,19 @@ local function startSpectating(targetPlayer, mode)
 end
 
 -- Connect Spectate GUI Buttons
-firstPersonBtn.MouseButton1Click:Connect(function()
+firstPersonBtn.Activated:Connect(function()
 	if spectatingTarget then
 		startSpectating(spectatingTarget, "FirstPerson")
 	end
 end)
 
-thirdPersonBtn.MouseButton1Click:Connect(function()
+thirdPersonBtn.Activated:Connect(function()
 	if spectatingTarget then
 		startSpectating(spectatingTarget, "ThirdPerson")
 	end
 end)
 
-shiftlockBtn.MouseButton1Click:Connect(function()
+shiftlockBtn.Activated:Connect(function()
 	if spectateMode == "ThirdPerson" then
 		isShiftlock = not isShiftlock
 		if isShiftlock then
@@ -1760,12 +1762,12 @@ shiftlockBtn.MouseButton1Click:Connect(function()
 			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
 		else
 			shiftlockBtn.Text = "Shiftlock: OFF"
-			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 		end
 	end
 end)
 
-stopSpectateBtn.MouseButton1Click:Connect(stopSpectating)
+stopSpectateBtn.Activated:Connect(stopSpectating)
 
 -- ==========================================================
 -- Subtitle Warning Animation
@@ -1853,7 +1855,7 @@ Players.PlayerAdded:Connect(function(p)
 end)
 
 -- Close Button Connection Cleanup
-close.MouseButton1Click:Connect(function()
+close.Activated:Connect(function()
 	if annoyConnection then annoyConnection:Disconnect() end
 	if annoyPart then annoyPart:Destroy() end
 	if handWeld then handWeld:Destroy() end
@@ -1883,9 +1885,12 @@ close.MouseButton1Click:Connect(function()
 end)
 
 -- Main Close Connection (Setting Settings close)
-unexecBtnMain.MouseButton1Click:Connect(function()
+unexecBtnMain.Activated:Connect(function()
 	createNotification("Closing...", "See you next time!", 2)
 	task.wait(0.2)
 	-- Safely fires all cleaning processes before closure
 	close:Activate()
 end)
+
+the script got cut off at the bottom near the annoy function and then some other parts have been cut off so could you please send the full script with all these changes and fix the cutoff? 
+and u can look at the video u can see the circle button is not working anymore once i tap on it.
