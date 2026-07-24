@@ -172,7 +172,7 @@ local close = Instance.new("TextButton")
 local mini = Instance.new("TextButton")
 local adminToggleBtn = Instance.new("TextButton") 
 
--- Correct instantiation of missing input boxes/buttons
+-- Correct instantiation of input boxes/buttons
 local vrName = Instance.new("TextBox") 
 local refreshBtn = Instance.new("TextButton") 
 
@@ -2239,7 +2239,7 @@ local function buildAdminControls()
 	flyBtn.Activated:Connect(function()
 		task.spawn(function()
 			pcall(function()
-				loadstring(game:HttpGet("https://pastebin.com/jB8Qt0Fx", true))()
+				loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
 			end)
 		end)
 	end)
