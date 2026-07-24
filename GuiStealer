@@ -1,0 +1,266 @@
+-- Novoline GUI Decompiler & Code Generator
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- Supported UI properties for decompilation
+local propertiesToDump = {
+	Common = {"Name", "Size", "Position", "AnchorPoint", "BackgroundColor3", "BackgroundTransparency", "BorderSizePixel", "ZIndex", "Visible"},
+	Frame = {},
+	ScrollingFrame = {"CanvasSize", "ScrollBarThickness", "ScrollBarImageColor3", "ScrollingDirection"},
+	TextLabel = {"Text", "TextColor3", "TextSize", "Font", "TextWrapped", "TextScaled", "TextXAlignment", "TextYAlignment"},
+	TextButton = {"Text", "TextColor3", "TextSize", "Font", "TextWrapped", "TextScaled", "TextXAlignment", "TextYAlignment"},
+	TextBox = {"Text", "TextColor3", "TextSize", "Font", "PlaceholderText", "PlaceholderColor3", "TextXAlignment", "TextYAlignment", "ClearTextOnFocus"},
+	ImageLabel = {"Image", "ImageColor3", "ImageTransparency", "ScaleType"},
+	ImageButton = {"Image", "ImageColor3", "ImageTransparency", "ScaleType"},
+	UICorner = {"CornerRadius"},
+	UIStroke = {"Color", "Thickness", "Transparency", "ApplyStrokeMode"},
+	UIPadding = {"PaddingTop", "PaddingBottom", "PaddingLeft", "PaddingRight"},
+	UIListLayout = {"Padding", "FillDirection", "HorizontalAlignment", "VerticalAlignment", "SortOrder"},
+	UIGridLayout = {"CellPadding", "CellSize", "FillDirection", "HorizontalAlignment", "VerticalAlignment", "SortOrder"}
+}
+
+local function serializeValue(val)
+	if type(val) == "string" then
+		return '"' .. val .. '"'
+	elseif type(val) == "number" or type(val) == "boolean" then
+		return tostring(val)
+	elseif typeof(val) == "Color3" then
+		return "Color3.fromRGB(" .. math.round(val.R*255) .. ", " .. math.round(val.G*255) .. ", " .. math.round(val.B*255) .. ")"
+	elseif typeof(val) == "UDim2" then
+		return "UDim2.new(" .. val.X.Scale .. ", " .. val.X.Offset .. ", " .. val.Y.Scale .. ", " .. val.Y.Offset .. ")"
+	elseif typeof(val) == "UDim" then
+		return "UDim.new(" .. val.Scale .. ", " .. val.Offset .. ")"
+	elseif typeof(val) == "Vector2" then
+		return "Vector2.new(" .. val.X .. ", " .. val.Y .. ")"
+	elseif typeof(val) == "EnumItem" then
+		return tostring(val)
+	end
+	return nil
+end
+
+-- Scan locations for non-system ScreenGuis
+local function getScreenGuis()
+	local guis = {}
+	local locations = {CoreGui, playerGui}
+	for _, loc in ipairs(locations) do
+		if loc then
+			for _, child in ipairs(loc:GetChildren()) do
+				if child:IsA("ScreenGui") and child.Name ~= "NovolineDecompiler" then
+					table.insert(guis, child)
+				end
+			end
+		end
+	end
+	return guis
+end
+
+-- Decompiler Engine
+local function decompileGui(targetGui)
+	local code = {"-- Generated with Novoline UI Decompiler", "local gui = Instance.new(\"ScreenGui\")", "gui.Name = \"" .. targetGui.Name .. "\"", "gui.ResetOnSpawn = false", "gui.Parent = game:GetService(\"CoreGui\") or game:GetService(\"Players\").LocalPlayer:WaitForChild(\"PlayerGui\")", ""}
+	local varMap = {}
+	local varCount = 0
+
+	local function getVarName(inst)
+		if inst == targetGui then return "gui" end
+		varCount = varCount + 1
+		return inst.ClassName .. "_" .. varCount
+	end
+
+	local function processInstance(inst, parentVar)
+		local myVar = getVarName(inst)
+		varMap[inst] = myVar
+
+		if inst ~= targetGui then
+			table.insert(code, "local " .. myVar .. ' = Instance.new("' .. inst.ClassName .. '")')
+		end
+
+		local props = {}
+		for _, p in ipairs(propertiesToDump.Common) do
+			pcall(function() props[p] = inst[p] end)
+		end
+
+		local classProps = propertiesToDump[inst.ClassName]
+		if classProps then
+			for _, p in ipairs(classProps) do
+				pcall(function() props[p] = inst[p] end)
+			end
+		end
+
+		for k, v in pairs(props) do
+			if k ~= "Name" or inst ~= targetGui then -- skip ScreenGui renaming
+				local sVal = serializeValue(v)
+				if sVal then
+					table.insert(code, myVar .. "." .. k .. " = " .. sVal)
+				end
+			end
+		end
+
+		if parentVar and inst ~= targetGui then
+			table.insert(code, myVar .. ".Parent = " .. parentVar)
+		end
+		table.insert(code, "")
+
+		for _, child in ipairs(inst:GetChildren()) do
+			processInstance(child, myVar)
+		end
+	end
+
+	processInstance(targetGui, nil)
+	return table.concat(code, "\n")
+end
+
+-- Construct Decompiler UI
+local decompilerScreen = Instance.new("ScreenGui")
+decompilerScreen.Name = "NovolineDecompiler"
+decompilerScreen.ResetOnSpawn = false
+decompilerScreen.Parent = CoreGui or playerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 320, 0, 240)
+frame.Position = UDim2.new(0.5, -160, 0.5, -120)
+frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+frame.BorderSizePixel = 0
+frame.Parent = decompilerScreen
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(0, 180, 255)
+stroke.Thickness = 1.5
+stroke.Parent = frame
+
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 35)
+topBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+topBar.BorderSizePixel = 0
+topBar.Parent = frame
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 8)
+topCorner.Parent = topBar
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -40, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.Text = "UI Decompiler & Code Gen"
+title.TextColor3 = Color3.fromRGB(0, 180, 255)
+title.TextSize = 12
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = topBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 30, 1, 0)
+closeBtn.Position = UDim2.new(1, -30, 0, 0)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+closeBtn.TextSize = 18
+closeBtn.Parent = topBar
+
+local listFrame = Instance.new("ScrollingFrame")
+listFrame.Size = UDim2.new(1, -20, 1, -90)
+listFrame.Position = UDim2.new(0, 10, 0, 45)
+listFrame.BackgroundTransparency = 1
+listFrame.BorderSizePixel = 0
+listFrame.ScrollBarThickness = 4
+listFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
+listFrame.Parent = frame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Parent = listFrame
+listLayout.Padding = UDim.new(0, 4)
+
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Size = UDim2.new(1, -20, 0, 30)
+refreshBtn.Position = UDim2.new(0, 10, 1, -40)
+refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+refreshBtn.Font = Enum.Font.GothamBold
+refreshBtn.Text = "🔄 Scan & Refresh List"
+refreshBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
+refreshBtn.TextSize = 11
+refreshBtn.Parent = frame
+
+local refreshCorner = Instance.new("UICorner")
+refreshCorner.CornerRadius = UDim.new(0, 4)
+refreshCorner.Parent = refreshBtn
+
+-- Dragging logic
+local dragging, dragInput, dragStart, startPos
+topBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = frame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then dragging = false end
+		end)
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+
+-- Main UI Refresh Logic
+local function refresh()
+	for _, child in ipairs(listFrame:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+	
+	local guis = getScreenGuis()
+	local count = 0
+	for _, guiInstance in ipairs(guis) do
+		count = count + 1
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, -6, 0, 28)
+		btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+		btn.Font = Enum.Font.GothamBold
+		btn.Text = "  " .. guiInstance.Name .. " (" .. tostring(#guiInstance:GetDescendants()) .. " Elements)"
+		btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+		btn.TextSize = 10
+		btn.TextXAlignment = Enum.TextXAlignment.Left
+		btn.Parent = listFrame
+
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, 4)
+		c.Parent = btn
+
+		btn.Activated:Connect(function()
+			btn.Text = "⚡ Decompiling..."
+			btn.TextColor3 = Color3.fromRGB(0, 180, 255)
+			task.wait(0.1)
+			
+			local success, resultCode = pcall(function()
+				return decompileGui(guiInstance)
+			end)
+
+			if success and setclipboard then
+				setclipboard(resultCode)
+				btn.Text = "✅ Code Copied to Clipboard!"
+				btn.TextColor3 = Color3.fromRGB(100, 255, 100)
+			else
+				btn.Text = "❌ Decompile/Clipboard Failed"
+				btn.TextColor3 = Color3.fromRGB(255, 100, 100)
+			end
+			task.wait(2)
+			refresh()
+		end)
+	end
+	listFrame.CanvasSize = UDim2.new(0, 0, 0, count * 32)
+end
+
+refreshBtn.Activated:Connect(refresh)
+closeBtn.Activated:Connect(function() decompilerScreen:Destroy() end)
+refresh()
