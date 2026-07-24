@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 -- Configuration
 local AVOID_DISTANCE = 30 -- Safe distance barrier (in studs)
@@ -16,12 +17,16 @@ local cfg = {
 	barColor = Color3.fromRGB(90, 170, 255),
 }
 
--- Global Variable Forward Declarations (Scope Fix)
-local homeBtn, togglesBtn, settingsBtn
-local DashboardPage, TogglesPage, SettingsPage
-local setAnnoyUI, setAntiGrabUI, setWeldUI, setAvoidTargetUI, setAvoidAllUI, setRemPropsUI, setNoclipPropsUI, setNoclipHeadsUI, setRenameHumanoidUI, setAirWalkUI, setVoidSafetyUI
+-- Global State & Upvalues
+local selectedPlayer = nil
+local antiGrabEnabled = false
 local avoidTargetEnabled = false
 local avoidAllEnabled = false
+local posIndex = 1
+
+-- Upvalues for connections and clean teardown
+local handWeld, grabConnection, descConnection, charAddedConnection
+local alignPos, alignRot, localAttachment, targetAttachment
 
 local bryh = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
@@ -29,19 +34,18 @@ local TopBar = Instance.new("Frame")
 local TitleLabel = Instance.new("TextLabel")
 local close = Instance.new("TextButton")
 local mini = Instance.new("TextButton")
-local circleToggle = Instance.new("ImageButton") -- Circular open/close floating button
+local TargetSection = Instance.new("Frame")
+local vrName = Instance.new("TextBox")
+local refreshBtn = Instance.new("TextButton")
+local dropdown = Instance.new("ScrollingFrame")
+local TogglesContainer = Instance.new("ScrollingFrame")
+local Shadow = Instance.new("Frame")
+local circleToggle = Instance.new("ImageButton") -- New Circular open/close button
 
 -- Handle GUI location dynamically based on executor support
 bryh.Name = "R4HandsHub"
 bryh.Parent = game:GetService("CoreGui") or Players.LocalPlayer:WaitForChild("PlayerGui")
 bryh.ResetOnSpawn = false
-
--- ==========================================================
--- Input Helper (Corrected to prevent double-firing on mobile)
--- ==========================================================
-local function connectClick(button, callback)
-	button.MouseButton1Click:Connect(callback)
-end
 
 -- ==========================================================
 -- Notification System
@@ -73,6 +77,7 @@ local function createNotification(title, content, length, iconId)
 	local mainStroke = Instance.new("UIStroke")
 	mainStroke.Color = cfg.barColor
 	mainStroke.Thickness = 1
+	mainStroke.Transparency = 0.5
 	mainStroke.Parent = main
 
 	local bar = Instance.new("Frame")
@@ -128,8 +133,7 @@ local function createNotification(title, content, length, iconId)
 	sub.TextWrapped = true
 	sub.Parent = main
 
-	-- Client-safe unique ID generator
-	local id = tostring(math.floor(tick()*1000)) .. "-" .. tostring(math.random(1, 100000))
+	local id = tostring(math.floor(tick()*1000)) .. "-" .. HttpService:GenerateGUID(false)
 	table.insert(notifActive, {id = id, frame = main, sizeY = h})
 
 	local function restack()
@@ -174,7 +178,7 @@ local function createNotification(title, content, length, iconId)
 	btn.Text = ""
 	btn.ZIndex = 10
 	btn.Parent = main
-	connectClick(btn, destroy)
+	btn.Activated:Connect(destroy)
 
 	return {Close = destroy}
 end
@@ -186,11 +190,9 @@ MainFrame.Name = "MainFrame"
 MainFrame.Parent = bryh
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
 MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.5, -230, 0.5, -170)
-MainFrame.Size = UDim2.new(0, 460, 0, 340)
+MainFrame.Position = UDim2.new(0.5, -190, 0.5, -220)
+MainFrame.Size = UDim2.new(0, 380, 0, 440)
 MainFrame.ClipsDescendants = true
-MainFrame.Visible = false -- Hidden by default on startup (toggle button activates it)
-MainFrame.ZIndex = 1
 
 local mainCorner = Instance.new("UICorner")
 mainCorner.CornerRadius = UDim.new(0, 10)
@@ -206,7 +208,6 @@ TopBar.Parent = MainFrame
 TopBar.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
 TopBar.BorderSizePixel = 0
 TopBar.Size = UDim2.new(1, 0, 0, 40)
-TopBar.ZIndex = 2
 
 local topBarCorner = Instance.new("UICorner")
 topBarCorner.CornerRadius = UDim.new(0, 10)
@@ -222,7 +223,6 @@ TitleLabel.Text = "&R4 Hideout // VR Hands"
 TitleLabel.TextColor3 = Color3.fromRGB(200, 230, 255)
 TitleLabel.TextSize = 14.000
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-TitleLabel.ZIndex = 3
 
 close.Name = "close"
 close.Parent = TopBar
@@ -235,7 +235,6 @@ close.Text = "×"
 close.TextColor3 = Color3.fromRGB(200, 230, 255)
 close.TextSize = 22.000
 close.Active = true
-close.ZIndex = 3
 
 mini.Name = "mini"
 mini.Parent = TopBar
@@ -248,9 +247,67 @@ mini.Text = "–"
 mini.TextColor3 = Color3.fromRGB(200, 230, 255)
 mini.TextSize = 18.000
 mini.Active = true
-mini.ZIndex = 3
 
--- Open/Close Floating Circular Trigger Button
+-- Target Selection Panel
+TargetSection.Name = "TargetSection"
+TargetSection.Parent = MainFrame
+TargetSection.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+TargetSection.BackgroundTransparency = 0.3
+TargetSection.BorderSizePixel = 0
+TargetSection.Position = UDim2.new(0, 0, 0, 40)
+TargetSection.Size = UDim2.new(1, 0, 0, 60)
+
+local targetSectionStroke = Instance.new("UIStroke")
+targetSectionStroke.Color = cfg.barColor
+targetSectionStroke.Thickness = 1
+targetSectionStroke.Transparency = 0.5
+targetSectionStroke.Parent = TargetSection
+
+vrName.Name = "vrName"
+vrName.Parent = TargetSection
+vrName.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+vrName.BackgroundTransparency = 0.3
+vrName.BorderSizePixel = 0
+vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
+vrName.Size = UDim2.new(0, 290, 0, 36)
+vrName.Font = Enum.Font.GothamSemibold
+vrName.PlaceholderText = "Search VR Player..."
+vrName.Text = ""
+vrName.TextColor3 = Color3.fromRGB(255, 255, 255)
+vrName.TextSize = 12.000
+vrName.TextXAlignment = Enum.TextXAlignment.Left
+
+local vrNameCorner = Instance.new("UICorner")
+vrNameCorner.CornerRadius = UDim.new(0, 6)
+vrNameCorner.Parent = vrName
+
+local vrNameStroke = Instance.new("UIStroke")
+vrNameStroke.Color = cfg.barColor
+vrNameStroke.Thickness = 1
+vrNameStroke.Transparency = 0.5
+vrNameStroke.Parent = vrName
+
+local vrNamePadding = Instance.new("UIPadding")
+vrNamePadding.PaddingLeft = UDim.new(0, 10)
+vrNamePadding.Parent = vrName
+
+refreshBtn.Name = "refreshBtn"
+refreshBtn.Parent = TargetSection
+refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+refreshBtn.BorderSizePixel = 0
+refreshBtn.Position = UDim2.new(1, -50, 0.5, -18)
+refreshBtn.Size = UDim2.new(0, 36, 0, 36)
+refreshBtn.Font = Enum.Font.GothamBold
+refreshBtn.Text = "🔄"
+refreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+refreshBtn.TextSize = 14.000
+refreshBtn.Active = true
+
+local refreshCorner = Instance.new("UICorner")
+refreshCorner.CornerRadius = UDim.new(0, 6)
+refreshCorner.Parent = refreshBtn
+
+-- Open/Close Circular Toggle Button
 circleToggle.Name = "circleToggle"
 circleToggle.Parent = bryh
 circleToggle.Size = UDim2.new(0, 50, 0, 50)
@@ -259,7 +316,6 @@ circleToggle.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
 circleToggle.Image = cfg.logo
 circleToggle.ImageColor3 = cfg.barColor
 circleToggle.Active = true
-circleToggle.ZIndex = 5
 
 local circleCorner = Instance.new("UICorner")
 circleCorner.CornerRadius = UDim.new(1, 0)
@@ -272,20 +328,18 @@ circleStroke.Parent = circleToggle
 
 -- Interactive pulse effects for hovering
 local function addHoverEffect(btn)
-	-- Only apply mouse hover animations if the user is using a Mouse (to prevent mobile touch conflicts)
-	if not UserInputService.TouchEnabled then
-		local origColor = btn.BackgroundColor3
-		btn.MouseEnter:Connect(function()
-			local popColor = Color3.new(math.min(origColor.R*1.2,1), math.min(origColor.G*1.2,1), math.min(origColor.B*1.2,1))
-			TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = popColor}):Play()
-		end)
-		btn.MouseLeave:Connect(function()
-			TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = origColor}):Play()
-		end)
-	end
+	local origColor = btn.BackgroundColor3
+	btn.MouseEnter:Connect(function()
+		local popColor = Color3.new(math.min(origColor.R*1.2,1), math.min(origColor.G*1.2,1), math.min(origColor.B*1.2,1))
+		TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = popColor}):Play()
+	end)
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = origColor}):Play()
+	end)
 end
 
 addHoverEffect(circleToggle)
+addHoverEffect(refreshBtn)
 
 -- Dragging GUI Connection with Viewport clamping (stops UI from leaving screen)
 local dragging, dragInput, dragStart, startPos
@@ -333,392 +387,364 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 -- Toggle Circle Button connection
-connectClick(circleToggle, function()
+circleToggle.Activated:Connect(function()
 	MainFrame.Visible = not MainFrame.Visible
 end)
 
--- Multi-Page Container Setup
-local Pages = Instance.new("Frame")
-Pages.Name = "Pages"
-Pages.Parent = MainFrame
-Pages.BackgroundTransparency = 1
-Pages.Position = UDim2.new(0, 10, 0, 50)
-Pages.Size = UDim2.new(1, -20, 1, -120)
-Pages.ZIndex = 2
+-- Player Search Dropdown
+dropdown.Name = "PlayerDropdown"
+dropdown.Parent = MainFrame
+dropdown.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+dropdown.BorderSizePixel = 0
+dropdown.Position = UDim2.new(0.04, 0, 0, 96)
+dropdown.Size = UDim2.new(0, 350, 0, 150)
+dropdown.CanvasSize = UDim2.new(0, 0, 0, 0)
+dropdown.ScrollBarThickness = 4
+dropdown.ScrollBarImageColor3 = cfg.barColor
+dropdown.Visible = false
+dropdown.ZIndex = 100
 
--- Bottom Tab Menu (Home / Actions / Settings)
-local TabBar = Instance.new("Frame")
-TabBar.Name = "TabBar"
-TabBar.Parent = MainFrame
-TabBar.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-TabBar.BackgroundTransparency = 0.3
-TabBar.Position = UDim2.new(0, 10, 1, -60)
-TabBar.Size = UDim2.new(1, -20, 0, 50)
-TabBar.ZIndex = 10 -- Elevated above background elements
+local dropdownCorner = Instance.new("UICorner")
+dropdownCorner.CornerRadius = UDim.new(0, 6)
+dropdownCorner.Parent = dropdown
 
-local tabBarCorner = Instance.new("UICorner")
-tabBarCorner.CornerRadius = UDim.new(0, 10)
-tabBarCorner.Parent = TabBar
+local dropdownStroke = Instance.new("UIStroke")
+dropdownStroke.Color = Color3.fromRGB(45, 45, 45)
+dropdownStroke.Thickness = 1
+dropdownStroke.Parent = dropdown
 
-local tabBarStroke = Instance.new("UIStroke")
-tabBarStroke.Color = cfg.barColor
-tabBarStroke.Thickness = 1
-tabBarStroke.Transparency = 0.5
-tabBarStroke.Parent = TabBar
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Parent = dropdown
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.Parent = TabBar
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-tabLayout.Padding = UDim.new(0, 15)
-
-local function createTabBtn(text)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 120, 1, -10)
-	btn.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
-	btn.Font = Enum.Font.GothamBold
-	btn.Text = text
-	btn.TextColor3 = Color3.fromRGB(150, 150, 150)
-	btn.TextSize = 11
-	btn.Parent = TabBar
-	btn.Active = true
-	btn.ZIndex = 11 -- Elevated above TabBar Frame
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, 8)
-	c.Parent = btn
-	addHoverEffect(btn)
-	return btn
-end
-
-homeBtn = createTabBtn("🏠 HOME")
-togglesBtn = createTabBtn("⚡ TOGGLES")
-settingsBtn = createTabBtn("⚙️ SETTINGS")
-
--- ==========================================================
--- Tab 1: Dashboard Page ( Welcome Screen )
--- ==========================================================
-DashboardPage = Instance.new("Frame")
-DashboardPage.Name = "DashboardPage"
-DashboardPage.Parent = Pages
-DashboardPage.BackgroundTransparency = 1
-DashboardPage.Size = UDim2.new(1, 0, 1, 0)
-DashboardPage.Visible = false
-DashboardPage.ZIndex = 3
-
--- Profile Card (Left)
-local ProfileCard = Instance.new("Frame")
-ProfileCard.Size = UDim2.new(0.4, -6, 1, 0)
-ProfileCard.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-ProfileCard.BackgroundTransparency = 0.3
-ProfileCard.Parent = DashboardPage
-ProfileCard.ZIndex = 4
-
-local profCorner = Instance.new("UICorner")
-profCorner.CornerRadius = UDim.new(0, 10)
-profCorner.Parent = ProfileCard
-
-local profStroke = Instance.new("UIStroke")
-profStroke.Color = cfg.barColor
-profStroke.Thickness = 1
-profStroke.Transparency = 0.5
-profStroke.Parent = ProfileCard
-
-local profileImg = Instance.new("ImageLabel")
-profileImg.Size = UDim2.new(0, 80, 0, 80)
-profileImg.Position = UDim2.new(0.5, -40, 0.15, 0)
-profileImg.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-profileImg.Parent = ProfileCard
-profileImg.ZIndex = 5
-pcall(function()
-	profileImg.Image = Players:GetUserThumbnailAsync(Players.LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
-end)
-
-local imgCorner = Instance.new("UICorner")
-imgCorner.CornerRadius = UDim.new(1, 0)
-imgCorner.Parent = profileImg
-
-local imgStroke = Instance.new("UIStroke")
-imgStroke.Color = cfg.barColor
-imgStroke.Thickness = 1.5
-imgStroke.Parent = profileImg
-
-local displayNameLabel = Instance.new("TextLabel")
-displayNameLabel.Size = UDim2.new(1, -20, 0, 20)
-displayNameLabel.Position = UDim2.new(0, 10, 0.62, 0)
-displayNameLabel.BackgroundTransparency = 1
-displayNameLabel.Font = Enum.Font.GothamBold
-displayNameLabel.Text = Players.LocalPlayer.DisplayName .. " ✔️"
-displayNameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-displayNameLabel.TextSize = 13
-displayNameLabel.Parent = ProfileCard
-displayNameLabel.ZIndex = 5
-
-local usernameLabel = Instance.new("TextLabel")
-usernameLabel.Size = UDim2.new(1, -20, 0, 20)
-usernameLabel.Position = UDim2.new(0, 10, 0.75, 0)
-usernameLabel.BackgroundTransparency = 1
-usernameLabel.Font = Enum.Font.Gotham
-usernameLabel.Text = "@" .. Players.LocalPlayer.Name
-usernameLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-usernameLabel.TextSize = 10
-usernameLabel.Parent = ProfileCard
-usernameLabel.ZIndex = 5
-
--- Stats Card (Right)
-local StatsCard = Instance.new("Frame")
-local statsLayout = Instance.new("UIGridLayout")
-
-StatsCard.Size = UDim2.new(0.6, -6, 1, 0)
-StatsCard.Position = UDim2.new(0.4, 12, 0, 0)
-StatsCard.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-StatsCard.BackgroundTransparency = 0.3
-StatsCard.Parent = DashboardPage
-StatsCard.ZIndex = 4
-
-local statsCorner = Instance.new("UICorner")
-statsCorner.CornerRadius = UDim.new(0, 10)
-statsCorner.Parent = StatsCard
-
-local statsStroke = Instance.new("UIStroke")
-statsStroke.Color = cfg.barColor
-statsStroke.Thickness = 1
-statsStroke.Transparency = 0.5
-statsStroke.Parent = StatsCard
-
-statsLayout.Parent = StatsCard
-statsLayout.CellPadding = UDim2.new(0, 8, 0, 8)
-statsLayout.CellSize = UDim2.new(0.5, -4, 0.5, -4)
-statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-local paddingStats = Instance.new("UIPadding")
-paddingStats.PaddingTop = UDim.new(0, 8)
-paddingStats.PaddingBottom = UDim.new(0, 8)
-paddingStats.PaddingLeft = UDim.new(0, 8)
-paddingStats.PaddingRight = UDim.new(0, 8)
-paddingStats.Parent = StatsCard
-
-local function createStatUnit(title, defaultVal)
-	local u = Instance.new("Frame")
-	u.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
-	u.ZIndex = 5
-	
-	local uc = Instance.new("UICorner")
-	uc.CornerRadius = UDim.new(0, 8)
-	uc.Parent = u
-
-	local us = Instance.new("UIStroke")
-	us.Color = cfg.barColor
-	us.Thickness = 1
-	us.Transparency = 0.8
-	us.Parent = u
-
-	local t = Instance.new("TextLabel")
-	t.Size = UDim2.new(1, -12, 0.4, 0)
-	t.Position = UDim2.new(0, 6, 0.1, 0)
-	t.BackgroundTransparency = 1
-	t.Font = Enum.Font.GothamMedium
-	t.Text = title
-	t.TextColor3 = Color3.fromRGB(150, 150, 150)
-	t.TextSize = 10
-	t.Parent = u
-	t.ZIndex = 6
-
-	local v = Instance.new("TextLabel")
-	v.Size = UDim2.new(1, -12, 0.4, 0)
-	v.Position = UDim2.new(0, 6, 0.5, 0)
-	v.BackgroundTransparency = 1
-	v.Font = Enum.Font.GothamBold
-	v.Text = defaultVal
-	v.TextColor3 = Color3.fromRGB(200, 230, 255)
-	v.TextSize = 12
-	v.Parent = u
-	v.ZIndex = 6
-
-	u.Parent = StatsCard
-	return v
-end
-
-local playersCountVal = createStatUnit("PLAYERS", "0/40")
-local pingVal = createStatUnit("PING", "0ms")
-local uptimeVal = createStatUnit("UPTIME", "00:00:00")
-local gameNameVal = createStatUnit("GAME", "VR Hands v3.2")
-
--- Dynamic Uptime loop
-local startUptime = os.time()
-task.spawn(function()
-	while task.wait(1) do
-		local diff = os.time() - startUptime
-		local hrs = math.floor(diff / 3600)
-		local mins = math.floor((diff % 3600) / 60)
-		local secs = diff % 60
-		uptimeVal.Text = string.format("%02d:%02d:%02d", hrs, mins, secs)
-	end
-end)
-
--- Dynamic Ping loop
-task.spawn(function()
-	while task.wait(2) do
-		local success, ping = pcall(function() return math.round(Players.LocalPlayer:GetNetworkPing() * 1000) end)
-		pingVal.Text = (success and ping) and (tostring(ping) .. "ms") or "120ms"
-	end
-end)
-
--- Dynamic Player Added loop
-local function updatePlayerCount()
-	playersCountVal.Text = tostring(#Players:GetPlayers()) .. "/40"
-end
-updatePlayerCount()
-Players.PlayerAdded:Connect(updatePlayerCount)
-Players.PlayerRemoving:Connect(updatePlayerCount)
-
--- ==========================================================
--- Tab 2: Toggles / Command List Page ( IMG_5927 Style )
--- ==========================================================
-TogglesPage = Instance.new("Frame")
-TogglesPage.Name = "TogglesPage"
-TogglesPage.Parent = Pages
-TogglesPage.BackgroundTransparency = 1
-TogglesPage.Size = UDim2.new(1, 0, 1, 0)
-TogglesPage.Visible = true -- Toggles tab is visible first by default
-TogglesPage.ZIndex = 3
-
--- Sub-navigation bar category tab row
-local CategoriesRow = Instance.new("Frame")
-CategoriesRow.Size = UDim2.new(1, 0, 0, 30)
-CategoriesRow.BackgroundTransparency = 1
-CategoriesRow.Parent = TogglesPage
-CategoriesRow.ZIndex = 4
-
-local catLayout = Instance.new("UIListLayout")
-catLayout.Parent = CategoriesRow
-catLayout.FillDirection = Enum.FillDirection.Horizontal
-catLayout.Padding = UDim.new(0, 6)
-
-local currentCategory = "All"
-
-local function createCategoryBtn(text, name)
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 72, 1, 0)
-	btn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-	btn.BackgroundTransparency = 0.3
-	btn.Font = Enum.Font.GothamBold
-	btn.Text = text
-	btn.TextColor3 = Color3.fromRGB(150, 150, 150)
-	btn.TextSize = 10
-	btn.Parent = CategoriesRow
-	btn.Active = true
-	btn.ZIndex = 5
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, 6)
-	c.Parent = btn
-	addHoverEffect(btn)
-	return btn
-end
-
-local catAll = createCategoryBtn("All", "All")
-local catTroll = createCategoryBtn("Troll", "Troll")
-local catExploit = createCategoryBtn("Exploit", "Exploit")
-local catMisc = createCategoryBtn("Misc", "Misc")
-
--- Search input field
-local SearchBar = Instance.new("Frame")
-SearchBar.Size = UDim2.new(1, 0, 0, 32)
-SearchBar.Position = UDim2.new(0, 0, 0, 36)
-SearchBar.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-SearchBar.BackgroundTransparency = 0.3
-SearchBar.Parent = TogglesPage
-SearchBar.ZIndex = 4
-
-local searchCorner = Instance.new("UICorner")
-searchCorner.CornerRadius = UDim.new(0, 6)
-searchCorner.Parent = SearchBar
-
-local searchStroke = Instance.new("UIStroke")
-searchStroke.Color = cfg.barColor
-searchStroke.Thickness = 1
-searchStroke.Transparency = 0.7
-searchStroke.Parent = SearchBar
-
-local searchBox = Instance.new("TextBox")
-searchBox.Size = UDim2.new(1, -20, 1, 0)
-searchBox.Position = UDim2.new(0, 10, 0, 0)
-searchBox.BackgroundTransparency = 1
-searchBox.Font = Enum.Font.GothamSemibold
-searchBox.PlaceholderText = "Search Toggles..."
-searchBox.Text = ""
-searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-searchBox.TextSize = 11
-searchBox.TextXAlignment = Enum.TextXAlignment.Left
-searchBox.Parent = SearchBar
-searchBox.ZIndex = 5
-
--- Filter toggles based on category & search string
-local function filterToggles()
-	local searchText = searchBox.Text:lower()
-	for _, toggleFrame in ipairs(TogglesContainer:GetChildren()) do
-		if toggleFrame:IsA("Frame") then
-			local category = toggleFrame:GetAttribute("Category")
-			local name = toggleFrame:GetAttribute("FeatureName"):lower()
-			
-			local matchesCategory = (currentCategory == "All" or category == currentCategory)
-			local matchesSearch = (searchText == "" or name:find(searchText, 1, true))
-			
-			toggleFrame.Visible = matchesCategory and matchesSearch
-		end
-	end
-end
-
-local function selectCategory(catName, btn)
-	currentCategory = catName
-	filterToggles()
-	
-	for _, b in ipairs({catAll, catTroll, catExploit, catMisc}) do
-		b.TextColor3 = Color3.fromRGB(150, 150, 150)
-	end
-	btn.TextColor3 = cfg.barColor
-end
-
-connectClick(catAll, function() selectCategory("All", catAll) end)
-connectClick(catTroll, function() selectCategory("Troll", catTroll) end)
-connectClick(catExploit, function() selectCategory("Exploit", catExploit) end)
-connectClick(catMisc, function() selectCategory("Misc", catMisc) end)
-selectCategory("All", catAll)
-
-searchBox:GetPropertyChangedSignal("Text"):Connect(filterToggles)
-
--- Toggles Container setup (Inside scrolling frame)
+-- Scrolling Toggles Container
 TogglesContainer.Name = "TogglesContainer"
-TogglesContainer.Parent = TogglesPage
+TogglesContainer.Parent = MainFrame
 TogglesContainer.Active = true
 TogglesContainer.BackgroundTransparency = 1.000
 TogglesContainer.BorderSizePixel = 0
-TogglesContainer.Position = UDim2.new(0, 0, 0, 75)
-TogglesContainer.Size = UDim2.new(1, 0, 1, -75)
+TogglesContainer.Position = UDim2.new(0, 10, 0, 105)
+TogglesContainer.Size = UDim2.new(1, -20, 1, -115)
 TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 620)
 TogglesContainer.ScrollBarThickness = 4
 TogglesContainer.ScrollBarImageColor3 = cfg.barColor
 TogglesContainer.ScrollBarImageTransparency = 0.6
-TogglesContainer.ZIndex = 4
 
 local toggleListLayout = Instance.new("UIListLayout")
 toggleListLayout.Parent = TogglesContainer
 toggleListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 toggleListLayout.Padding = UDim.new(0, 6)
 
--- Reusable Toggle Factory Component with category metadata
-local function createToggle(name, text, category, onClickCallback)
+-- Subtitle Panel Setup (Used for alert text visualization)
+local SubtitleFrame = Instance.new("Frame")
+local SubtitleLabel = Instance.new("TextLabel")
+
+SubtitleFrame.Name = "SubtitleFrame"
+SubtitleFrame.Parent = bryh
+SubtitleFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+SubtitleFrame.BackgroundTransparency = 0.4
+SubtitleFrame.BorderSizePixel = 0
+SubtitleFrame.Position = UDim2.new(0.5, -250, 1, -100)
+SubtitleFrame.Size = UDim2.new(0, 500, 0, 60)
+SubtitleFrame.Visible = false
+SubtitleFrame.ZIndex = 150
+
+local subCorner = Instance.new("UICorner")
+subCorner.CornerRadius = UDim.new(0, 6)
+subCorner.Parent = SubtitleFrame
+
+local subStroke = Instance.new("UIStroke")
+subStroke.Color = Color3.fromRGB(255, 50, 50)
+subStroke.Thickness = 1
+subStroke.Parent = SubtitleFrame
+
+SubtitleLabel.Name = "SubtitleLabel"
+SubtitleLabel.Parent = SubtitleFrame
+SubtitleLabel.BackgroundTransparency = 1
+SubtitleLabel.Size = UDim2.new(1, -16, 1, -16)
+SubtitleLabel.Position = UDim2.new(0, 8, 0, 8)
+SubtitleLabel.Font = Enum.Font.GothamMedium
+SubtitleLabel.Text = ""
+SubtitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+SubtitleLabel.TextSize = 13
+SubtitleLabel.TextWrapped = true
+
+-- Spectate Menu Setup
+local SpectateFrame = Instance.new("Frame")
+local spectateTitle = Instance.new("TextLabel")
+local firstPersonBtn = Instance.new("TextButton")
+local thirdPersonBtn = Instance.new("TextButton")
+local shiftlockBtn = Instance.new("TextButton")
+local stopSpectateBtn = Instance.new("TextButton")
+
+SpectateFrame.Name = "SpectateFrame"
+SpectateFrame.Parent = bryh
+SpectateFrame.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
+SpectateFrame.BorderSizePixel = 0
+SpectateFrame.Position = UDim2.new(0, 15, 0.5, -80)
+SpectateFrame.Size = UDim2.new(0, 130, 0, 160)
+SpectateFrame.Visible = false
+SpectateFrame.ZIndex = 80
+
+local specCorner = Instance.new("UICorner")
+specCorner.CornerRadius = UDim.new(0, 8)
+specCorner.Parent = SpectateFrame
+
+local specStroke = Instance.new("UIStroke")
+specStroke.Color = cfg.barColor
+specStroke.Thickness = 1.2
+specStroke.Parent = SpectateFrame
+
+local specLayout = Instance.new("UIListLayout")
+specLayout.Parent = SpectateFrame
+specLayout.SortOrder = Enum.SortOrder.LayoutOrder
+specLayout.Padding = UDim.new(0, 4)
+
+local specPadding = Instance.new("UIPadding")
+specPadding.PaddingTop = UDim.new(0, 6)
+specPadding.PaddingBottom = UDim.new(0, 6)
+specPadding.PaddingLeft = UDim.new(0, 6)
+specPadding.PaddingRight = UDim.new(0, 6)
+specPadding.Parent = SpectateFrame
+
+spectateTitle.Name = "Title"
+spectateTitle.Parent = SpectateFrame
+spectateTitle.BackgroundTransparency = 1
+spectateTitle.Size = UDim2.new(1, 0, 0, 20)
+spectateTitle.Font = Enum.Font.GothamBold
+spectateTitle.Text = "SPECTATE"
+spectateTitle.TextColor3 = cfg.barColor
+spectateTitle.TextSize = 11
+
+local function styleSpecBtn(btn, text)
+	btn.Size = UDim2.new(1, 0, 0, 24)
+	btn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+	btn.Font = Enum.Font.GothamBold
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+	btn.TextSize = 10
+	btn.Parent = SpectateFrame
+	btn.Active = true
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 4)
+	c.Parent = btn
+	addHoverEffect(btn)
+end
+
+styleSpecBtn(firstPersonBtn, "1st Person")
+styleSpecBtn(thirdPersonBtn, "3rd Person")
+styleSpecBtn(shiftlockBtn, "Shiftlock: OFF")
+styleSpecBtn(stopSpectateBtn, "❌ STOP")
+stopSpectateBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+
+-- Minimize/Maximize Animation
+local minimized = false
+local originalHeight = 440
+mini.Activated:Connect(function()
+	minimized = not minimized
+	local targetHeight = minimized and 40 or originalHeight
+	
+	MainFrame:TweenSize(
+		UDim2.new(0, 380, 0, targetHeight),
+		Enum.EasingDirection.Out,
+		Enum.EasingStyle.Quart,
+		0.3,
+		true,
+		function()
+			if minimized then
+				TogglesContainer.Visible = false
+				TargetSection.Visible = false
+				dropdown.Visible = false
+			else
+				TogglesContainer.Visible = true
+				TargetSection.Visible = true
+			end
+		end
+	)
+	
+	if not minimized then
+		TogglesContainer.Visible = true
+		TargetSection.Visible = true
+	end
+end)
+
+-- Target Handling Helper Functions
+local function getActiveTarget()
+	local targetPlayer = selectedPlayer
+	if not targetPlayer or targetPlayer.Parent == nil then
+		local typedText = vrName.Text:lower()
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p.Name:lower() == typedText or p.DisplayName:lower() == typedText then
+				targetPlayer = p
+				break
+			end
+		end
+	end
+	return targetPlayer
+end
+
+local function getVRHeadPart(targetPlayer)
+	if not targetPlayer then return nil end
+	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
+	if vrPlayersFolder then
+		local playerFolder = vrPlayersFolder:FindFirstChild(tostring(targetPlayer.UserId))
+		if playerFolder then
+			local vrHead = playerFolder:FindFirstChild("VRHead")
+			if vrHead then
+				return vrHead:FindFirstChild("Collider") or vrHead:FindFirstChild("HeadsetPart") or vrHead:FindFirstChild("Base")
+			end
+		end
+	end
+	local char = targetPlayer.Character
+	if char then
+		local vrHead = char:FindFirstChild("VRHead")
+		if vrHead then
+			return vrHead:FindFirstChild("Collider") or vrHead:FindFirstChild("HeadsetPart") or vrHead:FindFirstChild("Base")
+		end
+	end
+	return nil
+end
+
+local function getVRHandModel(targetPlayer, handName)
+	if not targetPlayer then return nil end
+	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
+	if vrPlayersFolder then
+		local playerFolder = vrPlayersFolder:FindFirstChild(tostring(targetPlayer.UserId))
+		if playerFolder then
+			return playerFolder:FindFirstChild(handName)
+		end
+	end
+	local char = targetPlayer.Character
+	if char then
+		return char:FindFirstChild(handName)
+	end
+	return nil
+end
+
+local function getVRHandPart(targetPlayer)
+	local handModel = getVRHandModel(targetPlayer, "RightHand")
+	if handModel then
+		return handModel:FindFirstChild("ControllerPart") or handModel:FindFirstChild("Base") or handModel:FindFirstChildOfClass("BasePart")
+	end
+	return nil
+end
+
+-- Scans a VR Hand model and returns the part physically closest to your character (used for accurate finger-tip avoidance)
+local function getClosestHandPart(handModel, characterHrp)
+	if not handModel or not characterHrp then return nil, math.huge end
+	local closestPart = nil
+	local minDistance = math.huge
+	for _, part in ipairs(handModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local dist = (characterHrp.Position - part.Position).Magnitude
+			if dist < minDistance then
+				minDistance = dist
+				closestPart = part
+			end
+		end
+	end
+	return closestPart, minDistance
+end
+
+-- Resets your character's collisions and touch triggers back to default
+local function restoreCharacterCollisions()
+	local char = Players.LocalPlayer.Character
+	if not char then return end
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			if part.Name ~= "HumanoidRootPart" then
+				part.CanCollide = true
+			end
+			part.CanTouch = true
+		end
+	end
+end
+
+-- Dropdown list update logic
+local function updateDropdown()
+	for _, child in ipairs(dropdown:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+
+	local searchText = vrName.Text:lower()
+	local count = 0
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= Players.LocalPlayer then
+			local username = p.Name:lower()
+			local displayname = p.DisplayName:lower()
+
+			if searchText == "" or username:find(searchText, 1, true) or displayname:find(searchText, 1, true) then
+				count = count + 1
+				local btn = Instance.new("TextButton")
+				btn.Name = p.Name
+				btn.Size = UDim2.new(1, -6, 0, 30)
+				btn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+				btn.BackgroundTransparency = 0.3
+				btn.BorderSizePixel = 0
+				btn.Font = Enum.Font.Gotham
+				btn.TextColor3 = Color3.fromRGB(200, 230, 255)
+				btn.Text = "  " .. p.DisplayName .. " (@" .. p.Name .. ")"
+				btn.TextSize = 11
+				btn.TextXAlignment = Enum.TextXAlignment.Left
+				btn.ZIndex = 101
+				btn.Parent = dropdown
+				btn.Active = true
+
+				local btnCorner = Instance.new("UICorner")
+				btnCorner.CornerRadius = UDim.new(0, 4)
+				btnCorner.Parent = btn
+
+				btn.Activated:Connect(function()
+					selectedPlayer = p
+					vrName.Text = p.Name
+					dropdown.Visible = false
+				end)
+			end
+		end
+	end
+	dropdown.CanvasSize = UDim2.new(0, 0, 0, count * 30)
+end
+
+vrName:GetPropertyChangedSignal("Text"):Connect(function()
+	if vrName:IsFocused() then
+		dropdown.Visible = true
+		updateDropdown()
+	end
+end)
+
+vrName.Focused:Connect(function()
+	dropdown.Visible = true
+	updateDropdown()
+end)
+
+refreshBtn.Activated:Connect(updateDropdown)
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		task.wait(0.15)
+		if not vrName:IsFocused() then dropdown.Visible = false end
+	end
+end)
+
+-- Track all toggles globally to force-shutdown on admin detection
+local activeFeatures = {}
+
+local function disableAllFeatures()
+	for name, feature in pairs(activeFeatures) do
+		feature.setter(false)
+		feature.callback(false)
+	end
+end
+
+-- Reusable Toggle Factory Component
+local function createToggle(name, text, onClickCallback)
 	local frame = Instance.new("Frame")
 	frame.Name = name .. "_Toggle"
-	frame.Size = UDim2.new(1, -6, 0, 45)
+	frame.Size = UDim2.new(1, -10, 0, 45)
 	frame.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
 	frame.BackgroundTransparency = 0.3
 	frame.BorderSizePixel = 0
 	frame.Parent = TogglesContainer
-	frame.ZIndex = 5
-	
-	frame:SetAttribute("Category", category)
-	frame:SetAttribute("FeatureName", text)
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 6)
@@ -740,11 +766,10 @@ local function createToggle(name, text, category, onClickCallback)
 	label.TextSize = 12
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Parent = frame
-	label.ZIndex = 6
 
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 64, 0, 26)
-	btn.Position = UDim2.new(1, -76, 0.5, -13)
+	btn.Size = UDim2.new(0.2, 0, 0.6, 0)
+	btn.Position = UDim2.new(0.75, 0, 0.2, 0)
 	btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
 	btn.Font = Enum.Font.GothamBold
 	btn.Text = "OFF"
@@ -752,14 +777,13 @@ local function createToggle(name, text, category, onClickCallback)
 	btn.TextSize = 10
 	btn.Parent = frame
 	btn.Active = true
-	btn.ZIndex = 6
 
 	local btnCorner = Instance.new("UICorner")
 	btnCorner.CornerRadius = UDim.new(0, 4)
 	btnCorner.Parent = btn
 
 	local state = false
-	connectClick(btn, function()
+	btn.Activated:Connect(function()
 		state = not state
 		if state then
 			btn.BackgroundColor3 = cfg.barColor
@@ -793,64 +817,8 @@ local function createToggle(name, text, category, onClickCallback)
 end
 
 -- ==========================================================
--- Tab 3: Settings Page
--- ==========================================================
-SettingsPage = Instance.new("Frame")
-SettingsPage.Name = "SettingsPage"
-SettingsPage.Parent = Pages
-SettingsPage.BackgroundTransparency = 1
-SettingsPage.Size = UDim2.new(1, 0, 1, 0)
-SettingsPage.Visible = false
-SettingsPage.ZIndex = 3
-
-local unexecBtnMain = Instance.new("TextButton")
-unexecBtnMain.Size = UDim2.new(1, 0, 0, 40)
-unexecBtnMain.Position = UDim2.new(0, 0, 0, 10)
-unexecBtnMain.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-unexecBtnMain.Font = Enum.Font.GothamBold
-unexecBtnMain.Text = "❌ UNEXECUTE SCRIPT"
-unexecBtnMain.TextColor3 = Color3.fromRGB(255, 100, 100)
-unexecBtnMain.TextSize = 12
-unexecBtnMain.Parent = SettingsPage
-unexecBtnMain.Active = true
-unexecBtnMain.ZIndex = 4
-
-local unexecMainCorner = Instance.new("UICorner")
-unexecMainCorner.CornerRadius = UDim.new(0, 8)
-unexecMainCorner.Parent = unexecBtnMain
-
-local unexecMainStroke = Instance.new("UIStroke")
-unexecMainStroke.Color = Color3.fromRGB(255, 50, 50)
-unexecMainStroke.Thickness = 1
-unexecMainStroke.Parent = unexecBtnMain
-
-addHoverEffect(unexecBtnMain)
-
--- Page Switch logic
-local function switchTab(tabName, btn)
-	DashboardPage.Visible = (tabName == "Dashboard")
-	TogglesPage.Visible = (tabName == "Toggles")
-	SettingsPage.Visible = (tabName == "Settings")
-	
-	for _, b in ipairs({homeBtn, togglesBtn, settingsBtn}) do
-		b.TextColor3 = Color3.fromRGB(150, 150, 150)
-		b.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
-	end
-	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-end
-
-connectClick(homeBtn, function() switchTab("Dashboard", homeBtn) end)
-connectClick(togglesBtn, function() switchTab("Toggles", togglesBtn) end)
-connectClick(settingsBtn, function() switchTab("Settings", settingsBtn) end)
-switchTab("Toggles", togglesBtn) -- Startup defaults to toggles page
-
--- ==========================================================
 -- Feature Functionality & Handlers
 -- ==========================================================
-
-local avoidTargetEnabled = false
-local avoidAllEnabled = false
 
 -- Client-Side TouchInterest Destroyer (prevents fast touch grabbing)
 local touchInterestConnection = nil
@@ -955,7 +923,7 @@ local function toggleAnnoy(state)
 
 			annoyConnection = RunService.Heartbeat:Connect(function()
 				if realHead and annoyPart and bp then
-					bp.Position = realHead.Position + realHead.Cframe.LookVector * 15 + realHead.Cframe.RightVector * 2
+					bp.Position = realHead.Position + realHead.CFrame.LookVector * 15 + realHead.CFrame.RightVector * 2
 				else
 					annoying = false
 					setAnnoyUI(false)
@@ -972,7 +940,7 @@ local function toggleAnnoy(state)
 		if annoyPart then annoyPart:Destroy() annoyPart = nil end
 	end
 end
-setAnnoyUI = createToggle("Annoy", "Annoy Target Player", "Troll", toggleAnnoy)
+local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", toggleAnnoy)
 
 -- 2. Anti Grab (Direct user script execution wrapped inside dynamic toggle)
 local antiGrabConnections = {}
@@ -984,11 +952,9 @@ local function startUserAntiGrab()
 	end
 	antiGrabConnections = {}
 
-	-- ==== YOUR EXACT ANTIGRAB SCRIPT (UNMODIFIED) ====
 	local player = game.Players.LocalPlayer
 	local char = player.Character or player.CharacterAdded:Wait()
 
-	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local pinchRemote = ReplicatedStorage.COM.Pinch.LetMeGo
 
 	local function onchar()
@@ -1038,7 +1004,7 @@ local function toggleAntiGrab(state)
 		stopUserAntiGrab()
 	end
 end
-setAntiGrabUI = createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", "Exploit", toggleAntiGrab)
+local _, setAntiGrabUI = createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", toggleAntiGrab)
 
 -- 3. Noclip VR Hands Handler
 local nocliphand = false
@@ -1072,7 +1038,7 @@ local function toggleNoclipHands(state)
 		end
 	end
 end
-createToggle("NoclipHands", "Noclip VR Hands", "Exploit", toggleNoclipHands)
+createToggle("NoclipHands", "Noclip VR Hands", toggleNoclipHands)
 
 -- 4. Weld to Hand (Direct CFrame + Velocity Extrapolation matching) Handler
 local weldConnection = nil
@@ -1109,7 +1075,7 @@ local function toggleFEWeld(state)
 		if hum then hum.PlatformStand = false end
 	end
 end
-setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", "Troll", toggleFEWeld)
+local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", toggleFEWeld)
 
 -- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
 local avoidTargetConnection = nil
@@ -1180,7 +1146,7 @@ local function toggleAvoidTarget(state)
 		restoreCharacterCollisions()
 	end
 end
-setAvoidTargetUI = createToggle("AvoidTarget", "Avoid Target VR Player's Hand", "Exploit", toggleAvoidTarget)
+createToggle("AvoidTarget", "Avoid Target VR Player's Hand", toggleAvoidTarget)
 
 -- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
 local avoidAllConnection = nil
@@ -1251,7 +1217,7 @@ local function toggleAvoidAll(state)
 		restoreCharacterCollisions()
 	end
 end
-setAvoidAllUI = createToggle("AvoidAll", "Avoid All VR Players' Hands", "Exploit", toggleAvoidAll)
+createToggle("AvoidAll", "Avoid All VR Players' Hands", toggleAvoidAll)
 
 -- 7. Remove Props Handler
 local removedprops = false
@@ -1265,7 +1231,7 @@ local function toggleRemProps(state)
 		if props then props.Parent = workspace end
 	end
 end
-setRemPropsUI = createToggle("RemProps", "Remove Game Props", "Troll", toggleRemProps)
+createToggle("RemProps", "Remove Game Props", toggleRemProps)
 
 -- 8. Noclip Props Handler
 local propnoclip = false
@@ -1278,7 +1244,7 @@ local function toggleNoclipProps(state)
 		end
 	end
 end
-setNoclipPropsUI = createToggle("NoclipProps", "Noclip Game Props", "Troll", toggleNoclipProps)
+createToggle("NoclipProps", "Noclip Game Props", toggleNoclipProps)
 
 -- 9. Noclip Heads Handler
 local headnoclip = false
@@ -1308,7 +1274,7 @@ local function toggleNoclipHeads(state)
 		end
 	end
 end
-setNoclipHeadsUI = createToggle("NoclipHeads", "Noclip VR Heads", "Troll", toggleNoclipHeads)
+createToggle("NoclipHeads", "Noclip VR Heads", toggleNoclipHeads)
 
 -- 10. Disable Pickup Handler (Humanoid Rename Fallback)
 local pickup = true
@@ -1325,7 +1291,7 @@ local function toggleRenameHumanoid(state)
 		if hum then hum.Name = "Humanoid" end
 	end
 end
-setRenameHumanoidUI = createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", "Misc", toggleRenameHumanoid)
+createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", toggleRenameHumanoid)
 
 -- 11. FE Air-Walk Handler (Pop-up Sub-GUI Feature)
 local airWalkEnabled = false
@@ -1674,7 +1640,7 @@ local function stopSpectating()
 	isShiftlock = false
 	SpectateFrame.Visible = false
 	shiftlockBtn.Text = "Shiftlock: OFF"
-	shiftlockBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+	shiftlockBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
 	
 	local char = Players.LocalPlayer.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1762,7 +1728,7 @@ shiftlockBtn.Activated:Connect(function()
 			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
 		else
 			shiftlockBtn.Text = "Shiftlock: OFF"
-			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
 		end
 	end
 end)
@@ -1882,12 +1848,4 @@ close.Activated:Connect(function()
 	disableVoidFloor()
 	stopSpectating()
 	bryh:Destroy()
-end)
-
--- Main Close Connection (Setting Settings close)
-unexecBtnMain.Activated:Connect(function()
-	createNotification("Closing...", "See you next time!", 2)
-	task.wait(0.2)
-	-- Safely fires all cleaning processes before closure
-	close:Activate()
 end)
