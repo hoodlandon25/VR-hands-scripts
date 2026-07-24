@@ -1,13 +1,13 @@
--- Novoline GUI Decompiler & Code Generator
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
--- Supported UI properties for decompilation
+-- Configuration & Serializer Setup
 local propertiesToDump = {
 	Common = {"Name", "Size", "Position", "AnchorPoint", "BackgroundColor3", "BackgroundTransparency", "BorderSizePixel", "ZIndex", "Visible"},
 	Frame = {},
@@ -43,25 +43,15 @@ local function serializeValue(val)
 	return nil
 end
 
--- Scan locations for non-system ScreenGuis
-local function getScreenGuis()
-	local guis = {}
-	local locations = {CoreGui, playerGui}
-	for _, loc in ipairs(locations) do
-		if loc then
-			for _, child in ipairs(loc:GetChildren()) do
-				if child:IsA("ScreenGui") and child.Name ~= "NovolineDecompiler" then
-					table.insert(guis, child)
-				end
-			end
-		end
-	end
-	return guis
-end
-
--- Decompiler Engine
 local function decompileGui(targetGui)
-	local code = {"-- Generated with Novoline UI Decompiler", "local gui = Instance.new(\"ScreenGui\")", "gui.Name = \"" .. targetGui.Name .. "\"", "gui.ResetOnSpawn = false", "gui.Parent = game:GetService(\"CoreGui\") or game:GetService(\"Players\").LocalPlayer:WaitForChild(\"PlayerGui\")", ""}
+	local code = {
+		"-- Generated with Novoline Interactive UI Decompiler",
+		"local gui = Instance.new(\"ScreenGui\")",
+		"gui.Name = \"" .. targetGui.Name .. "\"",
+		"gui.ResetOnSpawn = false",
+		"gui.Parent = game:GetService(\"CoreGui\") or game:GetService(\"Players\").LocalPlayer:WaitForChild(\"PlayerGui\")",
+		""
+	}
 	local varMap = {}
 	local varCount = 0
 
@@ -92,7 +82,7 @@ local function decompileGui(targetGui)
 		end
 
 		for k, v in pairs(props) do
-			if k ~= "Name" or inst ~= targetGui then -- skip ScreenGui renaming
+			if k ~= "Name" or inst ~= targetGui then
 				local sVal = serializeValue(v)
 				if sVal then
 					table.insert(code, myVar .. "." .. k .. " = " .. sVal)
@@ -114,18 +104,18 @@ local function decompileGui(targetGui)
 	return table.concat(code, "\n")
 end
 
--- Construct Decompiler UI
-local decompilerScreen = Instance.new("ScreenGui")
-decompilerScreen.Name = "NovolineDecompiler"
-decompilerScreen.ResetOnSpawn = false
-decompilerScreen.Parent = CoreGui or playerGui
+-- Construct Wizard GUI
+local wizardScreen = Instance.new("ScreenGui")
+wizardScreen.Name = "NovolineDecompiler"
+wizardScreen.ResetOnSpawn = false
+wizardScreen.Parent = CoreGui or playerGui
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 320, 0, 240)
-frame.Position = UDim2.new(0.5, -160, 0.5, -120)
-frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+frame.Size = UDim2.new(0, 320, 0, 180)
+frame.Position = UDim2.new(0.5, -160, 0.5, -90)
+frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 frame.BorderSizePixel = 0
-frame.Parent = decompilerScreen
+frame.Parent = wizardScreen
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 8)
@@ -138,7 +128,7 @@ stroke.Parent = frame
 
 local topBar = Instance.new("Frame")
 topBar.Size = UDim2.new(1, 0, 0, 35)
-topBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+topBar.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 topBar.BorderSizePixel = 0
 topBar.Parent = frame
 
@@ -151,7 +141,7 @@ title.Size = UDim2.new(1, -40, 1, 0)
 title.Position = UDim2.new(0, 10, 0, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.Text = "UI Decompiler & Code Gen"
+title.Text = "Novoline Guided Decompiler"
 title.TextColor3 = Color3.fromRGB(0, 180, 255)
 title.TextSize = 12
 title.TextXAlignment = Enum.TextXAlignment.Left
@@ -166,35 +156,81 @@ closeBtn.Text = "×"
 closeBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
 closeBtn.TextSize = 18
 closeBtn.Parent = topBar
+closeBtn.Active = true
 
-local listFrame = Instance.new("ScrollingFrame")
-listFrame.Size = UDim2.new(1, -20, 1, -90)
-listFrame.Position = UDim2.new(0, 10, 0, 45)
-listFrame.BackgroundTransparency = 1
-listFrame.BorderSizePixel = 0
-listFrame.ScrollBarThickness = 4
-listFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
-listFrame.Parent = frame
+local contentText = Instance.new("TextLabel")
+contentText.Size = UDim2.new(1, -20, 0, 70)
+contentText.Position = UDim2.new(0, 10, 0, 45)
+contentText.BackgroundTransparency = 1
+contentText.Font = Enum.Font.GothamMedium
+contentText.Text = "Welcome to the guided decompiler.\n\nPress Start below to begin."
+contentText.TextColor3 = Color3.fromRGB(200, 200, 200)
+contentText.TextSize = 11
+contentText.TextWrapped = true
+contentText.Parent = frame
 
-local listLayout = Instance.new("UIListLayout")
-listLayout.Parent = listFrame
-listLayout.Padding = UDim.new(0, 4)
+local actionBtn = Instance.new("TextButton")
+actionBtn.Size = UDim2.new(1, -20, 0, 35)
+actionBtn.Position = UDim2.new(0, 10, 1, -45)
+actionBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
+actionBtn.Font = Enum.Font.GothamBold
+actionBtn.Text = "START"
+actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+actionBtn.TextSize = 12
+actionBtn.Parent = frame
+actionBtn.Active = true
 
-local refreshBtn = Instance.new("TextButton")
-refreshBtn.Size = UDim2.new(1, -20, 0, 30)
-refreshBtn.Position = UDim2.new(0, 10, 1, -40)
-refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-refreshBtn.Font = Enum.Font.GothamBold
-refreshBtn.Text = "🔄 Scan & Refresh List"
-refreshBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
-refreshBtn.TextSize = 11
-refreshBtn.Parent = frame
+local actionCorner = Instance.new("UICorner")
+actionCorner.CornerRadius = UDim.new(0, 6)
+actionCorner.Parent = actionBtn
 
-local refreshCorner = Instance.new("UICorner")
-refreshCorner.CornerRadius = UDim.new(0, 4)
-refreshCorner.Parent = refreshBtn
+-- Bounding-Box Highlight Frame
+local highlightFrame = Instance.new("Frame")
+highlightFrame.BackgroundTransparency = 1
+highlightFrame.Size = UDim2.new(1, 0, 1, 0)
+local highlightStroke = Instance.new("UIStroke")
+highlightStroke.Color = Color3.fromRGB(0, 180, 255)
+highlightStroke.Thickness = 3
+highlightStroke.Parent = highlightFrame
 
--- Dragging logic
+-- Notepad Logs Frame (Initially Hidden)
+local logsFrame = Instance.new("Frame")
+logsFrame.Size = UDim2.new(1, -20, 1, -100)
+logsFrame.Position = UDim2.new(0, 10, 0, 45)
+logsFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+logsFrame.BorderSizePixel = 0
+logsFrame.Visible = false
+logsFrame.Parent = frame
+
+local logsCorner = Instance.new("UICorner")
+logsCorner.CornerRadius = UDim.new(0, 6)
+logsCorner.Parent = logsFrame
+
+local logsScroll = Instance.new("ScrollingFrame")
+logsScroll.Size = UDim2.new(1, -10, 1, -10)
+logsScroll.Position = UDim2.new(0, 5, 0, 5)
+logsScroll.BackgroundTransparency = 1
+logsScroll.BorderSizePixel = 0
+logsScroll.ScrollBarThickness = 4
+logsScroll.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
+logsScroll.Parent = logsFrame
+
+local logsBox = Instance.new("TextBox")
+logsBox.Size = UDim2.new(1, 0, 1, 0)
+logsBox.BackgroundTransparency = 1
+logsBox.Font = Enum.Font.Code
+logsBox.Text = ""
+logsBox.TextColor3 = Color3.fromRGB(180, 220, 255)
+logsBox.TextSize = 10
+logsBox.TextWrapped = true
+logsBox.TextXAlignment = Enum.TextXAlignment.Left
+logsBox.TextYAlignment = Enum.TextYAlignment.Top
+logsBox.MultiLine = true
+logsBox.ClearTextOnFocus = false
+logsBox.TextEditable = false
+logsBox.Parent = logsScroll
+
+-- Dragging logic for top bar
 local dragging, dragInput, dragStart, startPos
 topBar.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -213,54 +249,118 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
--- Main UI Refresh Logic
-local function refresh()
-	for _, child in ipairs(listFrame:GetChildren()) do
-		if child:IsA("TextButton") then child:Destroy() end
+-- Guided States
+local currentStep = 1
+local targetGui = nil
+local selectedElement = nil
+local hookConnections = {}
+local scanCore, scanPlayer
+
+local function cleanHookConnections()
+	for _, conn in ipairs(hookConnections) do
+		if conn.Connected then conn:Disconnect() end
 	end
-	
-	local guis = getScreenGuis()
-	local count = 0
-	for _, guiInstance in ipairs(guis) do
-		count = count + 1
-		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1, -6, 0, 28)
-		btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-		btn.Font = Enum.Font.GothamBold
-		btn.Text = "  " .. guiInstance.Name .. " (" .. tostring(#guiInstance:GetDescendants()) .. " Elements)"
-		btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-		btn.TextSize = 10
-		btn.TextXAlignment = Enum.TextXAlignment.Left
-		btn.Parent = listFrame
-
-		local c = Instance.new("UICorner")
-		c.CornerRadius = UDim.new(0, 4)
-		c.Parent = btn
-
-		btn.Activated:Connect(function()
-			btn.Text = "⚡ Decompiling..."
-			btn.TextColor3 = Color3.fromRGB(0, 180, 255)
-			task.wait(0.1)
-			
-			local success, resultCode = pcall(function()
-				return decompileGui(guiInstance)
-			end)
-
-			if success and setclipboard then
-				setclipboard(resultCode)
-				btn.Text = "✅ Code Copied to Clipboard!"
-				btn.TextColor3 = Color3.fromRGB(100, 255, 100)
-			else
-				btn.Text = "❌ Decompile/Clipboard Failed"
-				btn.TextColor3 = Color3.fromRGB(255, 100, 100)
-			end
-			task.wait(2)
-			refresh()
-		end)
-	end
-	listFrame.CanvasSize = UDim2.new(0, 0, 0, count * 32)
+	hookConnections = {}
 end
 
-refreshBtn.Activated:Connect(refresh)
-closeBtn.Activated:Connect(function() decompilerScreen:Destroy() end)
-refresh()
+local function finishAndDisplayLogs(generatedCode)
+	cleanHookConnections()
+	highlightFrame.Parent = nil
+
+	-- Resize main frame to log mode
+	frame.Size = UDim2.new(0, 460, 0, 380)
+	frame.Position = UDim2.new(0.5, -230, 0.5, -190)
+
+	contentText.Visible = false
+	logsFrame.Visible = true
+	logsBox.Text = generatedCode
+
+	-- Adjust Scroll Canvas Height
+	local textHeight = logsBox.TextBounds.Y
+	logsScroll.CanvasSize = UDim2.new(0, 0, 0, textHeight + 20)
+
+	actionBtn.Text = "📋 COPY LOGS TO CLIPBOARD"
+	actionBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
+	currentStep = 4
+end
+
+local function startTappingPhase()
+	currentStep = 3
+	contentText.Text = "Step 2/3: Detected GUI [" .. targetGui.Name .. "]\n\nNow, tap/click anywhere directly on that GUI with your finger to target it."
+	actionBtn.Text = "Waiting for tap..."
+	actionBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	actionBtn.Active = false
+
+	-- Setup touch hooks on the detected GUI descendants
+	local function hookElements()
+		cleanHookConnections()
+		for _, obj in ipairs(targetGui:GetDescendants()) do
+			if obj:IsA("GuiObject") then
+				local conn = obj.InputBegan:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+						selectedElement = obj
+						highlightFrame.Parent = obj -- Outline the selected element
+						
+						contentText.Text = "Step 3/3: Bounding-box locked on [" .. obj.Name .. "]\n\nPress OK below to generate the code logs."
+						actionBtn.Text = "OK"
+						actionBtn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+						actionBtn.Active = true
+					end
+				end)
+				table.insert(hookConnections, conn)
+			end
+		end
+	end
+	hookElements()
+end
+
+local function startWatchingPhase()
+	currentStep = 2
+	contentText.Text = "Step 1/3: Watching for your execution...\n\nExecute your other GUI script now. We will auto-detect it."
+	actionBtn.Text = "Watching..."
+	actionBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	actionBtn.Active = false
+
+	-- Connection detectors
+	local function onChildAdded(child)
+		if child:IsA("ScreenGui") and child.Name ~= "NovolineDecompiler" then
+			targetGui = child
+			if scanCore then scanCore:Disconnect() end
+			if scanPlayer then scanPlayer:Disconnect() end
+			startTappingPhase()
+		end
+	end
+
+	scanCore = CoreGui.ChildAdded:Connect(onChildAdded)
+	scanPlayer = playerGui.ChildAdded:Connect(onChildAdded)
+end
+
+actionBtn.Activated:Connect(function()
+	if currentStep == 1 then
+		startWatchingPhase()
+	elseif currentStep == 3 then
+		if targetGui then
+			local code = decompileGui(targetGui)
+			finishAndDisplayLogs(code)
+		end
+	elseif currentStep == 4 then
+		if setclipboard then
+			setclipboard(logsBox.Text)
+			actionBtn.Text = "✅ LOGS COPIED SUCCESSFULLY!"
+			task.wait(1.5)
+			actionBtn.Text = "📋 COPY LOGS TO CLIPBOARD"
+		else
+			actionBtn.Text = "❌ EXECUTOR LACKS CLIPBOARD FUNCTION"
+			task.wait(1.5)
+			actionBtn.Text = "📋 COPY LOGS TO CLIPBOARD"
+		end
+	end
+end)
+
+closeBtn.Activated:Connect(function()
+	if scanCore then scanCore:Disconnect() end
+	if scanPlayer then scanPlayer:Disconnect() end
+	cleanHookConnections()
+	highlightFrame:Destroy()
+	wizardScreen:Destroy()
+end)
