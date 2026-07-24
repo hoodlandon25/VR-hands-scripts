@@ -1,54 +1,424 @@
+-- ==========================================================
+-- Shared Cross-Client Admin Memory (Server-Wide)
+-- ==========================================================
+_G.R4HandsShared = _G.R4HandsShared or {
+	Blacklist = {
+		["Rizz-327_tom"] = { reason = "Initial test blacklist", expire = nil }
+	},
+	Admins = {
+		["zxLostAngelxz"] = true,
+		["Eysss427"] = true,
+	},
+	Logs = {}
+}
+
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+
+-- Blacklist and Expiration Guard
+local blacklistData = _G.R4HandsShared.Blacklist[localPlayer.Name] or _G.R4HandsShared.Blacklist[tostring(localPlayer.UserId)]
+if blacklistData then
+	if not blacklistData.expire or blacklistData.expire > os.time() then
+		-- Prompt Cover Frame
+		local screen = Instance.new("ScreenGui")
+		screen.Name = "R4_Blacklisted"
+		screen.ResetOnSpawn = false
+		screen.Parent = game:GetService("CoreGui") or localPlayer:WaitForChild("PlayerGui")
+
+		local frame = Instance.new("Frame")
+		frame.Size = UDim2.new(1, 0, 1, 0)
+		frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+		frame.Parent = screen
+
+		local container = Instance.new("Frame")
+		container.Size = UDim2.new(0, 500, 0, 300)
+		container.Position = UDim2.new(0.5, -250, 0.5, -150)
+		container.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+		container.Parent = frame
+		
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 12)
+		corner.Parent = container
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(255, 50, 50)
+		stroke.Thickness = 2
+		stroke.Parent = container
+
+		local title = Instance.new("TextLabel")
+		title.Size = UDim2.new(1, 0, 0, 50)
+		title.Text = "🛑 EXECUTION BLOCKED"
+		title.TextColor3 = Color3.fromRGB(255, 50, 50)
+		title.Font = Enum.Font.GothamBold
+		title.TextSize = 22
+		title.BackgroundTransparency = 1
+		title.Parent = container
+
+		local msg = Instance.new("TextLabel")
+		msg.Size = UDim2.new(1, -40, 1, -80)
+		msg.Position = UDim2.new(0, 20, 0, 60)
+		msg.BackgroundTransparency = 1
+		msg.Font = Enum.Font.GothamMedium
+		msg.TextSize = 14
+		msg.TextColor3 = Color3.fromRGB(220, 220, 220)
+		msg.TextWrapped = true
+		
+		local reasonText = blacklistData.reason or ""
+		if reasonText == "" then
+			msg.Text = "You have been blacklisted from this script.\n\nReason: You have abused this script or didn't listen to the mods when they told you to/not do somthing please take this as a warning you may be unblacklisted if you join the discord and send a request ticket"
+		else
+			msg.Text = "You have been blacklisted from this script.\n\nReason: " .. reasonText
+		end
+		msg.Parent = container
+		return -- Immediately prevent loading the rest of the script
+	end
+end
+
+-- ==========================================================
+-- Core Execution Continues
+-- ==========================================================
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 
 -- Configuration
-local AVOID_DISTANCE = 30 -- Safe distance barrier (in studs)
-local SAFE_DISTANCE = 32 -- Repel snap boundary
+local AVOID_DISTANCE = 30
+local SAFE_DISTANCE = 32
 local ROBLOX_STAFF_GROUPS = {1200769, 3055661, 14593111, 12513722, 10279336, 6821794, 3253689}
-local GAME_GROUP_ID = 6336 -- Mad Vikings Production Group ID
+local GAME_GROUP_ID = 6336
 
 local cfg = {
 	logo = "rbxassetid://121595097202790",
 	barColor = Color3.fromRGB(90, 170, 255),
+	adminColor = Color3.fromRGB(255, 60, 60),
 }
 
--- Global State & Upvalues
-local selectedPlayer = nil
-local antiGrabEnabled = false
-local avoidTargetEnabled = false
-local avoidAllEnabled = false
-local posIndex = 1
+-- Session Administrative State
+local isAdmin = _G.R4HandsShared.Admins[localPlayer.Name] or false
+local activeTab = "Main" -- Tracks whether viewing "Main" features or "Admin" features
 
--- Upvalues for connections and clean teardown
-local handWeld, grabConnection, descConnection, charAddedConnection
-local alignPos, alignRot, localAttachment, targetAttachment
+-- Logs Setup
+local function logExecution()
+	local entry = _G.R4HandsShared.Logs[localPlayer.Name]
+	if not entry then
+		entry = {
+			Name = localPlayer.Name,
+			UserId = localPlayer.UserId,
+			RunTimes = {},
+			FeaturesUsed = {},
+			ExternalScripts = {}
+		}
+		_G.R4HandsShared.Logs[localPlayer.Name] = entry
+	end
+	table.insert(entry.RunTimes, 1, os.date("%Y-%m-%d %H:%M:%S"))
+end
+logExecution()
 
+-- Meta-Hook to detect HTTP script executions run after loading
+local function logExternalScript(url)
+	local entry = _G.R4HandsShared.Logs[localPlayer.Name]
+	if entry then
+		table.insert(entry.ExternalScripts, 1, {
+			url = tostring(url),
+			time = os.date("%Y-%m-%d %H:%M:%S")
+		})
+	end
+end
+
+-- Safely Hook Namecall/HttpGet without crashing standard executors
+task.spawn(function()
+	pcall(function()
+		local mt = getrawmetatable(game)
+		if mt and setreadonly then
+			setreadonly(mt, false)
+			local oldNamecall = mt.__namecall
+			mt.__namecall = newcclosure(function(self, ...)
+				local method = getnamecallmethod()
+				if method == "HttpGet" or method == "HttpGetAsync" then
+					local args = {...}
+					if args[1] then
+						logExternalScript(args[1])
+					end
+				end
+				return oldNamecall(self, ...)
+			end)
+			setreadonly(mt, true)
+		end
+	end)
+end)
+
+local function logFeature(name)
+	local entry = _G.R4HandsShared.Logs[localPlayer.Name]
+	if entry then
+		if not table.find(entry.FeaturesUsed, name) then
+			table.insert(entry.FeaturesUsed, name)
+		end
+	end
+end
+
+-- Setup Master Screens
 local bryh = Instance.new("ScreenGui")
+bryh.Name = "R4HandsHub"
+bryh.Parent = game:GetService("CoreGui") or localPlayer:WaitForChild("PlayerGui")
+bryh.ResetOnSpawn = false
+
 local MainFrame = Instance.new("Frame")
 local TopBar = Instance.new("Frame")
 local TitleLabel = Instance.new("TextLabel")
 local close = Instance.new("TextButton")
 local mini = Instance.new("TextButton")
-local TargetSection = Instance.new("Frame")
-local vrName = Instance.new("TextBox")
-local refreshBtn = Instance.new("TextButton")
+local adminToggleBtn = Instance.new("TextButton") -- Button to swap layout / unlock
+
+-- UI Layout Configuration
+local mainCorner = Instance.new("UICorner")
+local mainStroke = Instance.new("UIStroke")
 local dropdown = Instance.new("ScrollingFrame")
 local TogglesContainer = Instance.new("ScrollingFrame")
-local Shadow = Instance.new("Frame")
-local circleToggle = Instance.new("ImageButton") -- New Circular open/close button
+local AdminContainer = Instance.new("ScrollingFrame") -- Unique container for Admins
+local circleToggle = Instance.new("ImageButton")
 
--- Handle GUI location dynamically based on executor support
-bryh.Name = "R4HandsHub"
-bryh.Parent = game:GetService("CoreGui") or Players.LocalPlayer:WaitForChild("PlayerGui")
-bryh.ResetOnSpawn = false
+-- Setup UI Containers
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = bryh
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.5, -190, 0.5, -220)
+MainFrame.Size = UDim2.new(0, 380, 0, 440)
+MainFrame.ClipsDescendants = true
+
+mainCorner.CornerRadius = UDim.new(0, 10)
+mainCorner.Parent = MainFrame
+
+mainStroke.Color = cfg.barColor
+mainStroke.Thickness = 1.5
+mainStroke.Parent = MainFrame
+
+-- Topbar
+TopBar.Name = "TopBar"
+TopBar.Parent = MainFrame
+TopBar.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+TopBar.BorderSizePixel = 0
+TopBar.Size = UDim2.new(1, 0, 0, 40)
+
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 10)
+topBarCorner.Parent = TopBar
+
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Parent = TopBar
+TitleLabel.BackgroundTransparency = 1.000
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+TitleLabel.Size = UDim2.new(0.5, 0, 1, 0)
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "&R4 Hideout // VR Hands"
+TitleLabel.TextColor3 = cfg.barColor
+TitleLabel.TextSize = 14.000
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+close.Name = "close"
+close.Parent = TopBar
+close.BackgroundTransparency = 1.000
+close.Position = UDim2.new(1, -35, 0, 0)
+close.Size = UDim2.new(0, 35, 1, 0)
+close.Font = Enum.Font.GothamMedium
+close.Text = "×"
+close.TextColor3 = Color3.fromRGB(200, 230, 255)
+close.TextSize = 22.000
+
+mini.Name = "mini"
+mini.Parent = TopBar
+mini.BackgroundTransparency = 1.000
+mini.Position = UDim2.new(1, -70, 0, 0)
+mini.Size = UDim2.new(0, 35, 1, 0)
+mini.Font = Enum.Font.GothamMedium
+mini.Text = "–"
+mini.TextColor3 = Color3.fromRGB(200, 230, 255)
+mini.TextSize = 18.000
+
+adminToggleBtn.Name = "adminToggleBtn"
+adminToggleBtn.Parent = TopBar
+adminToggleBtn.BackgroundTransparency = 1.000
+adminToggleBtn.Position = UDim2.new(1, -115, 0, 0)
+adminToggleBtn.Size = UDim2.new(0, 45, 1, 0)
+adminToggleBtn.Font = Enum.Font.GothamBold
+adminToggleBtn.Text = isAdmin and "🛡️" or "🔒"
+adminToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminToggleBtn.TextSize = 14.000
+
+-- Main Toggles View Setup
+TogglesContainer.Name = "TogglesContainer"
+TogglesContainer.Parent = MainFrame
+TogglesContainer.Active = true
+TogglesContainer.BackgroundTransparency = 1.000
+TogglesContainer.BorderSizePixel = 0
+TogglesContainer.Position = UDim2.new(0, 10, 0, 105)
+TogglesContainer.Size = UDim2.new(1, -20, 1, -115)
+TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 620)
+TogglesContainer.ScrollBarThickness = 4
+TogglesContainer.ScrollBarImageColor3 = cfg.barColor
+TogglesContainer.Visible = true
+
+local toggleListLayout = Instance.new("UIListLayout")
+toggleListLayout.Parent = TogglesContainer
+toggleListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+toggleListLayout.Padding = UDim.new(0, 6)
+
+-- Admin Controls Scroll View
+AdminContainer.Name = "AdminContainer"
+AdminContainer.Parent = MainFrame
+AdminContainer.Active = true
+AdminContainer.BackgroundTransparency = 1.000
+AdminContainer.BorderSizePixel = 0
+AdminContainer.Position = UDim2.new(0, 10, 0, 105)
+AdminContainer.Size = UDim2.new(1, -20, 1, -115)
+AdminContainer.CanvasSize = UDim2.new(0, 0, 0, 850)
+AdminContainer.ScrollBarThickness = 4
+AdminContainer.ScrollBarImageColor3 = cfg.adminColor
+AdminContainer.Visible = false
+
+local adminListLayout = Instance.new("UIListLayout")
+adminListLayout.Parent = AdminContainer
+adminListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+adminListLayout.Padding = UDim.new(0, 8)
+
+-- Target Panel
+local TargetSection = Instance.new("Frame")
+TargetSection.Name = "TargetSection"
+TargetSection.Parent = MainFrame
+TargetSection.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+TargetSection.BackgroundTransparency = 0.3
+TargetSection.BorderSizePixel = 0
+TargetSection.Position = UDim2.new(0, 0, 0, 40)
+TargetSection.Size = UDim2.new(1, 0, 0, 60)
+
+local targetSectionStroke = Instance.new("UIStroke")
+targetSectionStroke.Color = cfg.barColor
+targetSectionStroke.Thickness = 1
+targetSectionStroke.Transparency = 0.5
+targetSectionStroke.Parent = TargetSection
+
+vrName.Name = "vrName"
+vrName.Parent = TargetSection
+vrName.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+vrName.BackgroundTransparency = 0.3
+vrName.BorderSizePixel = 0
+vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
+vrName.Size = UDim2.new(0, 290, 0, 36)
+vrName.Font = Enum.Font.GothamSemibold
+vrName.PlaceholderText = "Search VR Player..."
+vrName.Text = ""
+vrName.TextColor3 = Color3.fromRGB(255, 255, 255)
+vrName.TextSize = 12.000
+vrName.TextXAlignment = Enum.TextXAlignment.Left
+
+local vrNameCorner = Instance.new("UICorner")
+vrNameCorner.CornerRadius = UDim.new(0, 6)
+vrNameCorner.Parent = vrName
+
+local vrNameStroke = Instance.new("UIStroke")
+vrNameStroke.Color = cfg.barColor
+vrNameStroke.Thickness = 1
+vrNameStroke.Transparency = 0.5
+vrNameStroke.Parent = vrName
+
+local vrNamePadding = Instance.new("UIPadding")
+vrNamePadding.PaddingLeft = UDim.new(0, 10)
+vrNamePadding.Parent = vrName
+
+refreshBtn.Name = "refreshBtn"
+refreshBtn.Parent = TargetSection
+refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+refreshBtn.BorderSizePixel = 0
+refreshBtn.Position = UDim2.new(1, -50, 0.5, -18)
+refreshBtn.Size = UDim2.new(0, 36, 0, 36)
+refreshBtn.Font = Enum.Font.GothamBold
+refreshBtn.Text = "🔄"
+refreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+refreshBtn.TextSize = 14.000
+
+-- Circular Overlay Toggle
+circleToggle.Name = "circleToggle"
+circleToggle.Parent = bryh
+circleToggle.Size = UDim2.new(0, 50, 0, 50)
+circleToggle.Position = UDim2.new(0, 15, 0, 150)
+circleToggle.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+circleToggle.Image = cfg.logo
+circleToggle.ImageColor3 = cfg.barColor
+circleToggle.Active = true
+
+local circleCorner = Instance.new("UICorner")
+circleCorner.CornerRadius = UDim.new(1, 0)
+circleCorner.Parent = circleToggle
+
+local circleStroke = Instance.new("UIStroke")
+circleStroke.Color = cfg.barColor
+circleStroke.Thickness = 1.5
+circleStroke.Parent = circleToggle
+
+-- Keypad Modal Structure
+local KeypadModal = Instance.new("Frame")
+local keyScreen = Instance.new("TextLabel")
+local keyGrid = Instance.new("Frame")
+
+KeypadModal.Name = "KeypadModal"
+KeypadModal.Size = UDim2.new(0, 240, 0, 310)
+KeypadModal.Position = UDim2.new(0.5, -120, 0.5, -155)
+KeypadModal.BackgroundColor3 = Color3.fromRGB(15, 20, 35)
+KeypadModal.BorderSizePixel = 0
+KeypadModal.Visible = false
+KeypadModal.Parent = bryh
+
+local keypadCorner = Instance.new("UICorner")
+keypadCorner.CornerRadius = UDim.new(0, 10)
+keypadCorner.Parent = KeypadModal
+
+local keypadStroke = Instance.new("UIStroke")
+keypadStroke.Color = cfg.barColor
+keypadStroke.Thickness = 2
+keypadStroke.Parent = KeypadModal
+
+keyScreen.Name = "keyScreen"
+keyScreen.Size = UDim2.new(1, -20, 0, 45)
+keyScreen.Position = UDim2.new(0, 10, 0, 15)
+keyScreen.BackgroundColor3 = Color3.fromRGB(10, 12, 22)
+keyScreen.Font = Enum.Font.Code
+keyScreen.Text = ""
+keyScreen.TextColor3 = Color3.fromRGB(255, 255, 255)
+keyScreen.TextSize = 18
+keyScreen.Parent = KeypadModal
+
+local screenCorner = Instance.new("UICorner")
+screenCorner.CornerRadius = UDim.new(0, 6)
+screenCorner.Parent = keyScreen
+
+keyGrid.Name = "keyGrid"
+keyGrid.Size = UDim2.new(1, -20, 0, 220)
+keyGrid.Position = UDim2.new(0, 10, 0, 75)
+keyGrid.BackgroundTransparency = 1
+keyGrid.Parent = KeypadModal
+
+local keyGridLayout = Instance.new("UIGridLayout")
+keyGridLayout.CellSize = UDim2.new(0, 65, 0, 45)
+keyGridLayout.CellPadding = UDim2.new(0, 12, 0, 10)
+keyGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+keyGridLayout.Parent = keyGrid
+
+-- Dynamic Color Theme Transition
+local function applyThemeTransition(targetColor, frameBg, topbarBg)
+	TweenService:Create(mainStroke, TweenInfo.new(0.4), {Color = targetColor}):Play()
+	TweenService:Create(circleStroke, TweenInfo.new(0.4), {Color = targetColor}):Play()
+	TweenService:Create(circleToggle, TweenInfo.new(0.4), {ImageColor3 = targetColor}):Play()
+	TweenService:Create(TitleLabel, TweenInfo.new(0.4), {TextColor3 = targetColor}):Play()
+	TweenService:Create(MainFrame, TweenInfo.new(0.4), {BackgroundColor3 = frameBg}):Play()
+	TweenService:Create(TopBar, TweenInfo.new(0.4), {BackgroundColor3 = topbarBg}):Play()
+	targetSectionStroke.Color = targetColor
+end
 
 -- ==========================================================
--- Notification System
+-- Notification Handler
 -- ==========================================================
 local notifActive = {}
 local function createNotification(title, content, length, iconId)
@@ -56,7 +426,7 @@ local function createNotification(title, content, length, iconId)
 	screen.Name = "NotifGui"
 	screen.ResetOnSpawn = false
 	screen.DisplayOrder = 2147483647
-	screen.Parent = game:GetService("CoreGui") or Players.LocalPlayer:WaitForChild("PlayerGui")
+	screen.Parent = game:GetService("CoreGui") or localPlayer:WaitForChild("PlayerGui")
 
 	local scale = math.clamp(math.min(workspace.CurrentCamera.ViewportSize.X, workspace.CurrentCamera.ViewportSize.Y)/1366, 0.6, 1.6)
 	local w = math.clamp(320*scale, 200, 520)
@@ -75,7 +445,7 @@ local function createNotification(title, content, length, iconId)
 	corner.Parent = main
 
 	local mainStroke = Instance.new("UIStroke")
-	mainStroke.Color = cfg.barColor
+	mainStroke.Color = isAdmin and cfg.adminColor or cfg.barColor
 	mainStroke.Thickness = 1
 	mainStroke.Transparency = 0.5
 	mainStroke.Parent = main
@@ -83,7 +453,7 @@ local function createNotification(title, content, length, iconId)
 	local bar = Instance.new("Frame")
 	bar.Size = UDim2.new(1, 0, 0, 4)
 	bar.Position = UDim2.new(0, 0, 1, -4)
-	bar.BackgroundColor3 = cfg.barColor
+	bar.BackgroundColor3 = isAdmin and cfg.adminColor or cfg.barColor
 	bar.BorderSizePixel = 0
 	bar.ClipsDescendants = true
 	bar.Parent = main
@@ -95,7 +465,7 @@ local function createNotification(title, content, length, iconId)
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.new(1, 0, 1, 0)
 	fill.Position = UDim2.new(0, 0, 0, 0)
-	fill.BackgroundColor3 = cfg.barColor
+	fill.BackgroundColor3 = isAdmin and cfg.adminColor or cfg.barColor
 	fill.BorderSizePixel = 0
 	fill.Parent = bar
 
@@ -104,7 +474,7 @@ local function createNotification(title, content, length, iconId)
 	icon.Position = UDim2.new(0, 0, 0, 0)
 	icon.BackgroundTransparency = 1
 	icon.Image = iconId or cfg.logo
-	icon.ImageColor3 = cfg.barColor
+	icon.ImageColor3 = isAdmin and cfg.adminColor or cfg.barColor
 	icon.ScaleType = Enum.ScaleType.Stretch
 	icon.Parent = main
 
@@ -183,149 +553,6 @@ local function createNotification(title, content, length, iconId)
 	return {Close = destroy}
 end
 
--- ==========================================================
--- Main GUI Setup ( &R4 Hideout Styling )
--- ==========================================================
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = bryh
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
-MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.5, -190, 0.5, -220)
-MainFrame.Size = UDim2.new(0, 380, 0, 440)
-MainFrame.ClipsDescendants = true
-
-local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 10)
-mainCorner.Parent = MainFrame
-
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = cfg.barColor
-mainStroke.Thickness = 1.5
-mainStroke.Parent = MainFrame
-
-TopBar.Name = "TopBar"
-TopBar.Parent = MainFrame
-TopBar.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-TopBar.BorderSizePixel = 0
-TopBar.Size = UDim2.new(1, 0, 0, 40)
-
-local topBarCorner = Instance.new("UICorner")
-topBarCorner.CornerRadius = UDim.new(0, 10)
-topBarCorner.Parent = TopBar
-
-TitleLabel.Name = "TitleLabel"
-TitleLabel.Parent = TopBar
-TitleLabel.BackgroundTransparency = 1.000
-TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.Size = UDim2.new(0.6, 0, 1, 0)
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "&R4 Hideout // VR Hands"
-TitleLabel.TextColor3 = Color3.fromRGB(200, 230, 255)
-TitleLabel.TextSize = 14.000
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-close.Name = "close"
-close.Parent = TopBar
-close.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-close.BackgroundTransparency = 1.000
-close.Position = UDim2.new(1, -35, 0, 0)
-close.Size = UDim2.new(0, 35, 1, 0)
-close.Font = Enum.Font.GothamMedium
-close.Text = "×"
-close.TextColor3 = Color3.fromRGB(200, 230, 255)
-close.TextSize = 22.000
-close.Active = true
-
-mini.Name = "mini"
-mini.Parent = TopBar
-mini.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-mini.BackgroundTransparency = 1.000
-mini.Position = UDim2.new(1, -70, 0, 0)
-mini.Size = UDim2.new(0, 35, 1, 0)
-mini.Font = Enum.Font.GothamMedium
-mini.Text = "–"
-mini.TextColor3 = Color3.fromRGB(200, 230, 255)
-mini.TextSize = 18.000
-mini.Active = true
-
--- Target Selection Panel
-TargetSection.Name = "TargetSection"
-TargetSection.Parent = MainFrame
-TargetSection.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-TargetSection.BackgroundTransparency = 0.3
-TargetSection.BorderSizePixel = 0
-TargetSection.Position = UDim2.new(0, 0, 0, 40)
-TargetSection.Size = UDim2.new(1, 0, 0, 60)
-
-local targetSectionStroke = Instance.new("UIStroke")
-targetSectionStroke.Color = cfg.barColor
-targetSectionStroke.Thickness = 1
-targetSectionStroke.Transparency = 0.5
-targetSectionStroke.Parent = TargetSection
-
-vrName.Name = "vrName"
-vrName.Parent = TargetSection
-vrName.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-vrName.BackgroundTransparency = 0.3
-vrName.BorderSizePixel = 0
-vrName.Position = UDim2.new(0.04, 0, 0.5, -18)
-vrName.Size = UDim2.new(0, 290, 0, 36)
-vrName.Font = Enum.Font.GothamSemibold
-vrName.PlaceholderText = "Search VR Player..."
-vrName.Text = ""
-vrName.TextColor3 = Color3.fromRGB(255, 255, 255)
-vrName.TextSize = 12.000
-vrName.TextXAlignment = Enum.TextXAlignment.Left
-
-local vrNameCorner = Instance.new("UICorner")
-vrNameCorner.CornerRadius = UDim.new(0, 6)
-vrNameCorner.Parent = vrName
-
-local vrNameStroke = Instance.new("UIStroke")
-vrNameStroke.Color = cfg.barColor
-vrNameStroke.Thickness = 1
-vrNameStroke.Transparency = 0.5
-vrNameStroke.Parent = vrName
-
-local vrNamePadding = Instance.new("UIPadding")
-vrNamePadding.PaddingLeft = UDim.new(0, 10)
-vrNamePadding.Parent = vrName
-
-refreshBtn.Name = "refreshBtn"
-refreshBtn.Parent = TargetSection
-refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-refreshBtn.BorderSizePixel = 0
-refreshBtn.Position = UDim2.new(1, -50, 0.5, -18)
-refreshBtn.Size = UDim2.new(0, 36, 0, 36)
-refreshBtn.Font = Enum.Font.GothamBold
-refreshBtn.Text = "🔄"
-refreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-refreshBtn.TextSize = 14.000
-refreshBtn.Active = true
-
-local refreshCorner = Instance.new("UICorner")
-refreshCorner.CornerRadius = UDim.new(0, 6)
-refreshCorner.Parent = refreshBtn
-
--- Open/Close Circular Toggle Button
-circleToggle.Name = "circleToggle"
-circleToggle.Parent = bryh
-circleToggle.Size = UDim2.new(0, 50, 0, 50)
-circleToggle.Position = UDim2.new(0, 15, 0, 150)
-circleToggle.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-circleToggle.Image = cfg.logo
-circleToggle.ImageColor3 = cfg.barColor
-circleToggle.Active = true
-
-local circleCorner = Instance.new("UICorner")
-circleCorner.CornerRadius = UDim.new(1, 0)
-circleCorner.Parent = circleToggle
-
-local circleStroke = Instance.new("UIStroke")
-circleStroke.Color = cfg.barColor
-circleStroke.Thickness = 1.5
-circleStroke.Parent = circleToggle
-
 -- Interactive pulse effects for hovering
 local function addHoverEffect(btn)
 	local origColor = btn.BackgroundColor3
@@ -341,7 +568,7 @@ end
 addHoverEffect(circleToggle)
 addHoverEffect(refreshBtn)
 
--- Dragging GUI Connection with Viewport clamping (stops UI from leaving screen)
+-- Dragging GUI Connection with Viewport clamping
 local dragging, dragInput, dragStart, startPos
 local function updateDrag(input)
 	local delta = input.Position - dragStart
@@ -386,12 +613,11 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
--- Toggle Circle Button connection
 circleToggle.Activated:Connect(function()
 	MainFrame.Visible = not MainFrame.Visible
 end)
 
--- Player Search Dropdown
+-- Player Dropdown UI
 dropdown.Name = "PlayerDropdown"
 dropdown.Parent = MainFrame
 dropdown.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
@@ -417,25 +643,7 @@ local uiListLayout = Instance.new("UIListLayout")
 uiListLayout.Parent = dropdown
 uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
--- Scrolling Toggles Container
-TogglesContainer.Name = "TogglesContainer"
-TogglesContainer.Parent = MainFrame
-TogglesContainer.Active = true
-TogglesContainer.BackgroundTransparency = 1.000
-TogglesContainer.BorderSizePixel = 0
-TogglesContainer.Position = UDim2.new(0, 10, 0, 105)
-TogglesContainer.Size = UDim2.new(1, -20, 1, -115)
-TogglesContainer.CanvasSize = UDim2.new(0, 0, 0, 620)
-TogglesContainer.ScrollBarThickness = 4
-TogglesContainer.ScrollBarImageColor3 = cfg.barColor
-TogglesContainer.ScrollBarImageTransparency = 0.6
-
-local toggleListLayout = Instance.new("UIListLayout")
-toggleListLayout.Parent = TogglesContainer
-toggleListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-toggleListLayout.Padding = UDim.new(0, 6)
-
--- Subtitle Panel Setup (Used for alert text visualization)
+-- Subtitles Frame
 local SubtitleFrame = Instance.new("Frame")
 local SubtitleLabel = Instance.new("TextLabel")
 
@@ -537,38 +745,166 @@ styleSpecBtn(shiftlockBtn, "Shiftlock: OFF")
 styleSpecBtn(stopSpectateBtn, "❌ STOP")
 stopSpectateBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
 
--- Minimize/Maximize Animation
-local minimized = false
-local originalHeight = 440
-mini.Activated:Connect(function()
-	minimized = not minimized
-	local targetHeight = minimized and 40 or originalHeight
-	
-	MainFrame:TweenSize(
-		UDim2.new(0, 380, 0, targetHeight),
-		Enum.EasingDirection.Out,
-		Enum.EasingStyle.Quart,
-		0.3,
-		true,
-		function()
-			if minimized then
-				TogglesContainer.Visible = false
-				TargetSection.Visible = false
-				dropdown.Visible = false
-			else
-				TogglesContainer.Visible = true
-				TargetSection.Visible = true
+-- Dropdown update logic
+local function updateDropdown()
+	for _, child in ipairs(dropdown:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+
+	local searchText = vrName.Text:lower()
+	local count = 0
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= localPlayer then
+			local username = p.Name:lower()
+			local displayname = p.DisplayName:lower()
+
+			if searchText == "" or username:find(searchText, 1, true) or displayname:find(searchText, 1, true) then
+				count = count + 1
+				local btn = Instance.new("TextButton")
+				btn.Name = p.Name
+				btn.Size = UDim2.new(1, -6, 0, 30)
+				btn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+				btn.BackgroundTransparency = 0.3
+				btn.BorderSizePixel = 0
+				btn.Font = Enum.Font.Gotham
+				btn.TextColor3 = Color3.fromRGB(200, 230, 255)
+				btn.Text = "  " .. p.DisplayName .. " (@" .. p.Name .. ")"
+				btn.TextSize = 11
+				btn.TextXAlignment = Enum.TextXAlignment.Left
+				btn.ZIndex = 101
+				btn.Parent = dropdown
+				btn.Active = true
+
+				local btnCorner = Instance.new("UICorner")
+				btnCorner.CornerRadius = UDim.new(0, 4)
+				btnCorner.Parent = btn
+
+				btn.Activated:Connect(function()
+					selectedPlayer = p
+					vrName.Text = p.Name
+					dropdown.Visible = false
+				end)
 			end
 		end
-	)
-	
-	if not minimized then
-		TogglesContainer.Visible = true
-		TargetSection.Visible = true
+	end
+	dropdown.CanvasSize = UDim2.new(0, 0, 0, count * 30)
+end
+
+vrName:GetPropertyChangedSignal("Text"):Connect(function()
+	if vrName:IsFocused() then
+		dropdown.Visible = true
+		updateDropdown()
 	end
 end)
 
--- Target Handling Helper Functions
+vrName.Focused:Connect(function()
+	dropdown.Visible = true
+	updateDropdown()
+end)
+
+refreshBtn.Activated:Connect(updateDropdown)
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		task.wait(0.15)
+		if not vrName:IsFocused() then dropdown.Visible = false end
+	end
+end)
+
+-- Track all toggles globally
+local activeFeatures = {}
+
+local function disableAllFeatures()
+	for name, feature in pairs(activeFeatures) do
+		feature.setter(false)
+		feature.callback(false)
+	end
+end
+
+-- Reusable Toggle Factory Component
+local function createToggle(name, text, onClickCallback)
+	local frame = Instance.new("Frame")
+	frame.Name = name .. "_Toggle"
+	frame.Size = UDim2.new(1, -10, 0, 45)
+	frame.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+	frame.BackgroundTransparency = 0.3
+	frame.BorderSizePixel = 0
+	frame.Parent = TogglesContainer
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = cfg.barColor
+	stroke.Thickness = 1
+	stroke.Transparency = 0.7
+	stroke.Parent = frame
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.7, 0, 1, 0)
+	label.Position = UDim2.new(0, 12, 0, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamMedium
+	label.Text = text
+	label.TextColor3 = Color3.fromRGB(200, 230, 255)
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = frame
+
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0.2, 0, 0.6, 0)
+	btn.Position = UDim2.new(0.75, 0, 0.2, 0)
+	btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+	btn.Font = Enum.Font.GothamBold
+	btn.Text = "OFF"
+	btn.TextColor3 = Color3.fromRGB(200, 230, 255)
+	btn.TextSize = 10
+	btn.Parent = frame
+	btn.Active = true
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 4)
+	btnCorner.Parent = btn
+
+	local state = false
+	btn.Activated:Connect(function()
+		state = not state
+		if state then
+			btn.BackgroundColor3 = isAdmin and cfg.adminColor or cfg.barColor
+			btn.TextColor3 = Color3.fromRGB(20, 30, 50)
+			btn.Text = "ON"
+			createNotification("Enabled", text .. " has been activated.", 3)
+			logFeature(text)
+		else
+			btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+			btn.TextColor3 = Color3.fromRGB(200, 230, 255)
+			btn.Text = "OFF"
+			createNotification("Disabled", text .. " has been deactivated.", 3)
+		end
+		onClickCallback(state)
+	end)
+
+	local function setUIState(forceState)
+		state = forceState
+		if state then
+			btn.BackgroundColor3 = isAdmin and cfg.adminColor or cfg.barColor
+			btn.TextColor3 = Color3.fromRGB(20, 30, 50)
+			btn.Text = "ON"
+		else
+			btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+			btn.TextColor3 = Color3.fromRGB(200, 230, 255)
+			btn.Text = "OFF"
+		end
+	end
+
+	activeFeatures[name] = { setter = setUIState, callback = onClickCallback }
+	return frame, setUIState
+end
+
+-- ==========================================================
+-- Core VR Controls Functionality & Handlers
+-- ==========================================================
 local function getActiveTarget()
 	local targetPlayer = selectedPlayer
 	if not targetPlayer or targetPlayer.Parent == nil then
@@ -629,7 +965,6 @@ local function getVRHandPart(targetPlayer)
 	return nil
 end
 
--- Scans a VR Hand model and returns the part physically closest to your character (used for accurate finger-tip avoidance)
 local function getClosestHandPart(handModel, characterHrp)
 	if not handModel or not characterHrp then return nil, math.huge end
 	local closestPart = nil
@@ -646,9 +981,8 @@ local function getClosestHandPart(handModel, characterHrp)
 	return closestPart, minDistance
 end
 
--- Resets your character's collisions and touch triggers back to default
 local function restoreCharacterCollisions()
-	local char = Players.LocalPlayer.Character
+	local char = localPlayer.Character
 	if not char then return end
 	for _, part in ipairs(char:GetDescendants()) do
 		if part:IsA("BasePart") then
@@ -660,172 +994,12 @@ local function restoreCharacterCollisions()
 	end
 end
 
--- Dropdown list update logic
-local function updateDropdown()
-	for _, child in ipairs(dropdown:GetChildren()) do
-		if child:IsA("TextButton") then child:Destroy() end
-	end
-
-	local searchText = vrName.Text:lower()
-	local count = 0
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= Players.LocalPlayer then
-			local username = p.Name:lower()
-			local displayname = p.DisplayName:lower()
-
-			if searchText == "" or username:find(searchText, 1, true) or displayname:find(searchText, 1, true) then
-				count = count + 1
-				local btn = Instance.new("TextButton")
-				btn.Name = p.Name
-				btn.Size = UDim2.new(1, -6, 0, 30)
-				btn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-				btn.BackgroundTransparency = 0.3
-				btn.BorderSizePixel = 0
-				btn.Font = Enum.Font.Gotham
-				btn.TextColor3 = Color3.fromRGB(200, 230, 255)
-				btn.Text = "  " .. p.DisplayName .. " (@" .. p.Name .. ")"
-				btn.TextSize = 11
-				btn.TextXAlignment = Enum.TextXAlignment.Left
-				btn.ZIndex = 101
-				btn.Parent = dropdown
-				btn.Active = true
-
-				local btnCorner = Instance.new("UICorner")
-				btnCorner.CornerRadius = UDim.new(0, 4)
-				btnCorner.Parent = btn
-
-				btn.Activated:Connect(function()
-					selectedPlayer = p
-					vrName.Text = p.Name
-					dropdown.Visible = false
-				end)
-			end
-		end
-	end
-	dropdown.CanvasSize = UDim2.new(0, 0, 0, count * 30)
-end
-
-vrName:GetPropertyChangedSignal("Text"):Connect(function()
-	if vrName:IsFocused() then
-		dropdown.Visible = true
-		updateDropdown()
-	end
-end)
-
-vrName.Focused:Connect(function()
-	dropdown.Visible = true
-	updateDropdown()
-end)
-
-refreshBtn.Activated:Connect(updateDropdown)
-
-UserInputService.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		task.wait(0.15)
-		if not vrName:IsFocused() then dropdown.Visible = false end
-	end
-end)
-
--- Track all toggles globally to force-shutdown on admin detection
-local activeFeatures = {}
-
-local function disableAllFeatures()
-	for name, feature in pairs(activeFeatures) do
-		feature.setter(false)
-		feature.callback(false)
-	end
-end
-
--- Reusable Toggle Factory Component
-local function createToggle(name, text, onClickCallback)
-	local frame = Instance.new("Frame")
-	frame.Name = name .. "_Toggle"
-	frame.Size = UDim2.new(1, -10, 0, 45)
-	frame.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-	frame.BackgroundTransparency = 0.3
-	frame.BorderSizePixel = 0
-	frame.Parent = TogglesContainer
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = frame
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = cfg.barColor
-	stroke.Thickness = 1
-	stroke.Transparency = 0.7
-	stroke.Parent = frame
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0.7, 0, 1, 0)
-	label.Position = UDim2.new(0, 12, 0, 0)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamMedium
-	label.Text = text
-	label.TextColor3 = Color3.fromRGB(200, 230, 255)
-	label.TextSize = 12
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = frame
-
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0.2, 0, 0.6, 0)
-	btn.Position = UDim2.new(0.75, 0, 0.2, 0)
-	btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-	btn.Font = Enum.Font.GothamBold
-	btn.Text = "OFF"
-	btn.TextColor3 = Color3.fromRGB(200, 230, 255)
-	btn.TextSize = 10
-	btn.Parent = frame
-	btn.Active = true
-
-	local btnCorner = Instance.new("UICorner")
-	btnCorner.CornerRadius = UDim.new(0, 4)
-	btnCorner.Parent = btn
-
-	local state = false
-	btn.Activated:Connect(function()
-		state = not state
-		if state then
-			btn.BackgroundColor3 = cfg.barColor
-			btn.TextColor3 = Color3.fromRGB(20, 30, 50)
-			btn.Text = "ON"
-			createNotification("Enabled", text .. " has been activated.", 3)
-		else
-			btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-			btn.TextColor3 = Color3.fromRGB(200, 230, 255)
-			btn.Text = "OFF"
-			createNotification("Disabled", text .. " has been deactivated.", 3)
-		end
-		onClickCallback(state)
-	end)
-
-	local function setUIState(forceState)
-		state = forceState
-		if state then
-			btn.BackgroundColor3 = cfg.barColor
-			btn.TextColor3 = Color3.fromRGB(20, 30, 50)
-			btn.Text = "ON"
-		else
-			btn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-			btn.TextColor3 = Color3.fromRGB(200, 230, 255)
-			btn.Text = "OFF"
-		end
-	end
-
-	activeFeatures[name] = { setter = setUIState, callback = onClickCallback }
-	return frame, setUIState
-end
-
--- ==========================================================
--- Feature Functionality & Handlers
--- ==========================================================
-
--- Client-Side TouchInterest Destroyer (prevents fast touch grabbing)
+-- TouchInterest loops
 local touchInterestConnection = nil
 local function startTouchInterestDestroyer()
 	if touchInterestConnection then return end
 	touchInterestConnection = RunService.Heartbeat:Connect(function()
-		local char = Players.LocalPlayer.Character
+		local char = localPlayer.Character
 		if char then
 			for _, child in ipairs(char:GetDescendants()) do
 				if child:IsA("TouchTransmitter") or child.Name == "TouchInterest" then
@@ -843,7 +1017,6 @@ local function stopTouchInterestDestroyer()
 	end
 end
 
--- Activates / Deactivates the touchinterest loop depending on toggled actions
 local function updateTouchInterestDestroyerState()
 	if antiGrabEnabled or avoidTargetEnabled or avoidAllEnabled then
 		startTouchInterestDestroyer()
@@ -852,23 +1025,21 @@ local function updateTouchInterestDestroyerState()
 	end
 end
 
--- Client-Side Joint Destroyer (instantly cuts grabs by deleting target welds before they desync)
+-- Joint Destroyer
 local jointConnection = nil
 local function startJointDestroyer()
 	if jointConnection then return end
 	jointConnection = RunService.Heartbeat:Connect(function()
-		local char = Players.LocalPlayer.Character
+		local char = localPlayer.Character
 		if char then
 			for _, part in ipairs(char:GetChildren()) do
 				if part:IsA("BasePart") then
-					-- Scan legacy joints (Weld, Motor6D, etc.)
 					for _, joint in ipairs(part:GetJoints()) do
 						local otherPart = (joint.Part0 == part) and joint.Part1 or joint.Part0
 						if otherPart and not otherPart:IsDescendantOf(char) then
 							joint:Destroy()
 						end
 					end
-					-- Scan WeldConstraints
 					for _, child in ipairs(part:GetChildren()) do
 						if child:IsA("WeldConstraint") then
 							local otherPart = (child.Part0 == part) and child.Part1 or child.Part0
@@ -890,16 +1061,15 @@ local function stopJointDestroyer()
 	end
 end
 
--- 1. Annoy Player Handler
+-- Feature: Annoy Target
 local annoying = false
 local annoyConnection = nil
 local annoyPart = nil
-
 local function toggleAnnoy(state)
 	if state then
 		local targetPlayer = getActiveTarget()
 		local realHead = getVRHeadPart(targetPlayer)
-		local character = Players.LocalPlayer.Character
+		local character = localPlayer.Character
 		local hrp = character and character:FindFirstChild("HumanoidRootPart")
 
 		if realHead and hrp then
@@ -918,7 +1088,6 @@ local function toggleAnnoy(state)
 			bp.P = 1000000
 			bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
 			bp.Parent = annoyPart
-			
 			annoyPart.Parent = workspace
 
 			annoyConnection = RunService.Heartbeat:Connect(function()
@@ -942,26 +1111,22 @@ local function toggleAnnoy(state)
 end
 local _, setAnnoyUI = createToggle("Annoy", "Annoy Target Player", toggleAnnoy)
 
--- 2. Anti Grab (Direct user script execution wrapped inside dynamic toggle)
+-- Feature: Anti Grab
 local antiGrabConnections = {}
-
 local function startUserAntiGrab()
-	-- Clean existing connections first to prevent duplicate memory leaks
 	for _, conn in ipairs(antiGrabConnections) do
 		if conn.Connected then conn:Disconnect() end
 	end
 	antiGrabConnections = {}
 
-	local player = game.Players.LocalPlayer
+	local player = localPlayer
 	local char = player.Character or player.CharacterAdded:Wait()
-
 	local pinchRemote = ReplicatedStorage.COM.Pinch.LetMeGo
 
 	local function onchar()
 		if char:GetAttribute("Grabbed") then
 			pinchRemote:FireServer()
 		end
-
 		local attrConn = char:GetAttributeChangedSignal("Grabbed"):Connect(function()
 			if char:GetAttribute("Grabbed") then
 				pinchRemote:FireServer()
@@ -977,7 +1142,6 @@ local function startUserAntiGrab()
 	end)
 	table.insert(antiGrabConnections, charAddedConn)
 
-	-- Active periodic fallback breakfree loop
 	task.spawn(function()
 		while antiGrabEnabled do
 			if pinchRemote then
@@ -1006,11 +1170,10 @@ local function toggleAntiGrab(state)
 end
 local _, setAntiGrabUI = createToggle("AntiGrab", "Anti-Grab (Active Breakfree)", toggleAntiGrab)
 
--- 3. Noclip VR Hands Handler
+-- Feature: Noclip Hands
 local nocliphand = false
 local function toggleNoclipHands(state)
 	nocliphand = state
-	
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		for _, playerFolder in ipairs(vrPlayersFolder:GetChildren()) do
@@ -1024,26 +1187,13 @@ local function toggleNoclipHands(state)
 			end
 		end
 	end
-
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= Players.LocalPlayer and p.Character then
-			for _, handName in ipairs({"RightHand", "LeftHand"}) do
-				local hand = p.Character:FindFirstChild("RightHand") or p.Character:FindFirstChild("LeftHand")
-				if hand and hand:IsA("Model") then
-					for _, item in ipairs(hand:GetDescendants()) do
-						if item:IsA("BasePart") then item.CanCollide = not nocliphand end
-					end
-				end
-			end
-		end
-	end
 end
 createToggle("NoclipHands", "Noclip VR Hands", toggleNoclipHands)
 
--- 4. Weld to Hand (Direct CFrame + Velocity Extrapolation matching) Handler
+-- Feature: FE Weld to Hand
 local weldConnection = nil
 local function toggleFEWeld(state)
-	local char = Players.LocalPlayer.Character
+	local char = localPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 
@@ -1052,13 +1202,10 @@ local function toggleFEWeld(state)
 		local handPart = getVRHandPart(targetPlayer)
 
 		if handPart and hrp and hum then
-			-- Platform stand keeps Humanoid controller from fighting local positioning
 			hum.PlatformStand = true
-
 			if weldConnection then weldConnection:Disconnect() end
 			weldConnection = RunService.Heartbeat:Connect(function()
 				if handPart and handPart.Parent and hrp and char and char.Parent then
-					-- Matches position, velocity, and angular velocity to synchronize physics replication tightly
 					hrp.CFrame = handPart.CFrame
 					hrp.AssemblyLinearVelocity = handPart.AssemblyLinearVelocity
 					hrp.AssemblyAngularVelocity = handPart.AssemblyAngularVelocity
@@ -1077,11 +1224,10 @@ local function toggleFEWeld(state)
 end
 local _, setWeldUI = createToggle("WeldHand", "FE Weld to VR Hand", toggleFEWeld)
 
--- 5. Avoid Target Hand Handler (Snap Safe-Zone + Ghost Bypass)
+-- Feature: Avoid Target
 local avoidTargetConnection = nil
-
 local function handleAvoidTarget()
-	local char = Players.LocalPlayer.Character
+	local char = localPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 
@@ -1098,16 +1244,8 @@ local function handleAvoidTarget()
 				if rh then table.insert(handModels, rh) end
 			end
 		end
-		
-		if #handModels == 0 and targetPlayer.Character then
-			local lh = targetPlayer.Character:FindFirstChild("LeftHand")
-			local rh = targetPlayer.Character:FindFirstChild("RightHand")
-			if lh then table.insert(handModels, lh) end
-			if rh then table.insert(handModels, rh) end
-		end
 
 		local insideDangerZone = false
-
 		for _, handModel in ipairs(handModels) do
 			local closestPart, dist = getClosestHandPart(handModel, hrp)
 			if closestPart and dist < AVOID_DISTANCE then
@@ -1115,20 +1253,15 @@ local function handleAvoidTarget()
 				local dir = (hrp.Position - closestPart.Position)
 				local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 				if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
-				
-				-- Snaps your character out of range immediately. Linear velocity is reset to 0 to prevent flinging
 				local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * SAFE_DISTANCE)
 				hrp.CFrame = CFrame.new(safePos)
 				hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 			end
 		end
 
-		-- Activates ghost-mode while in the threat area so grab touched-triggers fail to connect
 		for _, part in ipairs(char:GetDescendants()) do
 			if part:IsA("BasePart") then
-				if part.Name ~= "HumanoidRootPart" then
-					part.CanCollide = not insideDangerZone
-				end
+				if part.Name ~= "HumanoidRootPart" then part.CanCollide = not insideDangerZone end
 				part.CanTouch = not insideDangerZone
 			end
 		end
@@ -1146,22 +1279,20 @@ local function toggleAvoidTarget(state)
 		restoreCharacterCollisions()
 	end
 end
-createToggle("AvoidTarget", "Avoid Target VR Player's Hand", toggleAvoidTarget)
+createToggle("AvoidTarget", "Avoid Target Hand", toggleAvoidTarget)
 
--- 6. Avoid All Hands Handler (Snap Safe-Zone + Ghost Bypass)
+-- Feature: Avoid All
 local avoidAllConnection = nil
-
 local function handleAvoidAll()
-	local char = Players.LocalPlayer.Character
+	local char = localPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 
 	local handModels = {}
-
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		for _, playerFolder in ipairs(vrPlayersFolder:GetChildren()) do
-			if playerFolder.Name ~= tostring(Players.LocalPlayer.UserId) then
+			if playerFolder.Name ~= tostring(localPlayer.UserId) then
 				local lh = playerFolder:FindFirstChild("LeftHand")
 				local rh = playerFolder:FindFirstChild("RightHand")
 				if lh then table.insert(handModels, lh) end
@@ -1170,17 +1301,7 @@ local function handleAvoidAll()
 		end
 	end
 
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= Players.LocalPlayer and p.Character then
-			local lh = p.Character:FindFirstChild("LeftHand")
-			local rh = p.Character:FindFirstChild("RightHand")
-			if lh and lh:IsA("Model") then table.insert(handModels, lh) end
-			if rh and rh:IsA("Model") then table.insert(handModels, rh) end
-		end
-	end
-
 	local insideDangerZone = false
-
 	for _, handModel in ipairs(handModels) do
 		local closestPart, dist = getClosestHandPart(handModel, hrp)
 		if closestPart and dist < AVOID_DISTANCE then
@@ -1188,19 +1309,15 @@ local function handleAvoidAll()
 			local dir = (hrp.Position - closestPart.Position)
 			local pushDir = Vector3.new(dir.X, 0, dir.Z).Unit
 			if pushDir.Magnitude == 0 then pushDir = Vector3.new(1, 0, 0) end
-			
 			local safePos = Vector3.new(closestPart.Position.X, hrp.Position.Y, closestPart.Position.Z) + (pushDir * SAFE_DISTANCE)
 			hrp.CFrame = CFrame.new(safePos)
 			hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 		end
 	end
 
-	-- Activates ghost-mode while in the threat area so grab touched-triggers fail to connect
 	for _, part in ipairs(char:GetDescendants()) do
 		if part:IsA("BasePart") then
-			if part.Name ~= "HumanoidRootPart" then
-				part.CanCollide = not insideDangerZone
-			end
+			if part.Name ~= "HumanoidRootPart" then part.CanCollide = not insideDangerZone end
 			part.CanTouch = not insideDangerZone
 		end
 	end
@@ -1217,9 +1334,9 @@ local function toggleAvoidAll(state)
 		restoreCharacterCollisions()
 	end
 end
-createToggle("AvoidAll", "Avoid All VR Players' Hands", toggleAvoidAll)
+createToggle("AvoidAll", "Avoid All Hands", toggleAvoidAll)
 
--- 7. Remove Props Handler
+-- Feature: Remove Props
 local removedprops = false
 local function toggleRemProps(state)
 	removedprops = state
@@ -1233,7 +1350,7 @@ local function toggleRemProps(state)
 end
 createToggle("RemProps", "Remove Game Props", toggleRemProps)
 
--- 8. Noclip Props Handler
+-- Feature: Noclip Props
 local propnoclip = false
 local function toggleNoclipProps(state)
 	propnoclip = state
@@ -1246,11 +1363,10 @@ local function toggleNoclipProps(state)
 end
 createToggle("NoclipProps", "Noclip Game Props", toggleNoclipProps)
 
--- 9. Noclip Heads Handler
+-- Feature: Noclip Heads
 local headnoclip = false
 local function toggleNoclipHeads(state)
 	headnoclip = state
-	
 	local vrPlayersFolder = workspace:FindFirstChild("VRPlayers")
 	if vrPlayersFolder then
 		for _, playerFolder in ipairs(vrPlayersFolder:GetChildren()) do
@@ -1262,27 +1378,15 @@ local function toggleNoclipHeads(state)
 			end
 		end
 	end
-
-	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= Players.LocalPlayer and p.Character then
-			local vrHead = p.Character:FindFirstChild("VRHead")
-			if vrHead and vrHead:IsA("Model") then
-				for _, item in ipairs(vrHead:GetDescendants()) do
-					if item:IsA("BasePart") then item.CanCollide = not headnoclip end
-				end
-			end
-		end
-	end
 end
 createToggle("NoclipHeads", "Noclip VR Heads", toggleNoclipHeads)
 
--- 10. Disable Pickup Handler (Humanoid Rename Fallback)
+-- Feature: Disable Pickup
 local pickup = true
 local function toggleRenameHumanoid(state)
-	local localChar = Players.LocalPlayer.Character
+	local localChar = localPlayer.Character
 	if not localChar then return end
 	pickup = not state
-
 	if not pickup then
 		local hum = localChar:FindFirstChildOfClass("Humanoid")
 		if hum then hum.Name = "lol" end
@@ -1293,7 +1397,7 @@ local function toggleRenameHumanoid(state)
 end
 createToggle("RenameHumanoid", "Disable Pickup (Lobby Rename)", toggleRenameHumanoid)
 
--- 11. FE Air-Walk Handler (Pop-up Sub-GUI Feature)
+-- Feature: FE Air-Walk
 local airWalkEnabled = false
 local platformPart = nil
 local airWalkConnection = nil
@@ -1312,14 +1416,13 @@ local function disableAirWalk()
 end
 
 local function enableAirWalk(setMainToggleUI)
-	local char = Players.LocalPlayer.Character
+	local char = localPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 
 	airWalkEnabled = true
 	platformHeight = hrp.Position.Y - 3.1
 
-	-- Create Neon Cylinder Platform
 	if platformPart then platformPart:Destroy() end
 	platformPart = Instance.new("Part")
 	platformPart.Name = "AirWalkPlatform"
@@ -1332,7 +1435,6 @@ local function enableAirWalk(setMainToggleUI)
 	platformPart.CanCollide = true
 	platformPart.Parent = workspace
 
-	-- Sub-GUI Construction
 	if subGui then subGui:Destroy() end
 	subGui = Instance.new("Frame")
 	subGui.Name = "AirWalkControl"
@@ -1340,7 +1442,7 @@ local function enableAirWalk(setMainToggleUI)
 	subGui.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
 	subGui.BorderSizePixel = 0
 	subGui.Size = UDim2.new(0, 110, 0, 145)
-	subGui.Position = UDim2.new(1, -125, 0, 15) -- Default Top-Right
+	subGui.Position = UDim2.new(1, -125, 0, 15)
 
 	local subCorner = Instance.new("UICorner")
 	subCorner.CornerRadius = UDim.new(0, 8)
@@ -1363,7 +1465,6 @@ local function enableAirWalk(setMainToggleUI)
 	subPadding.PaddingRight = UDim.new(0, 6)
 	subPadding.Parent = subGui
 
-	-- Cycle Location Button
 	local posBtn = Instance.new("TextButton")
 	posBtn.Size = UDim2.new(1, 0, 0, 26)
 	posBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
@@ -1371,20 +1472,14 @@ local function enableAirWalk(setMainToggleUI)
 	posBtn.Text = "📍 CYCLE"
 	posBtn.TextColor3 = Color3.fromRGB(200, 230, 255)
 	posBtn.TextScaled = true
-	posBtn.TextSize = 10
 	posBtn.Parent = subGui
-	posBtn.Active = true
 	addHoverEffect(posBtn)
 
-	local posCorner = Instance.new("UICorner")
-	posCorner.CornerRadius = UDim.new(0, 4)
-	posCorner.Parent = posBtn
-
 	local positions = {
-		UDim2.new(0, 15, 0, 15),     -- TL
-		UDim2.new(1, -125, 0, 15),   -- TR
-		UDim2.new(0, 15, 1, -160),   -- BL
-		UDim2.new(1, -125, 1, -160)  -- BR
+		UDim2.new(0, 15, 0, 15),
+		UDim2.new(1, -125, 0, 15),
+		UDim2.new(0, 15, 1, -160),
+		UDim2.new(1, -125, 1, -160)
 	}
 
 	posBtn.Activated:Connect(function()
@@ -1392,7 +1487,6 @@ local function enableAirWalk(setMainToggleUI)
 		subGui.Position = positions[posIndex]
 	end)
 
-	-- Elevation UP Button
 	local upBtn = Instance.new("TextButton")
 	upBtn.Size = UDim2.new(1, 0, 0, 32)
 	upBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
@@ -1400,16 +1494,9 @@ local function enableAirWalk(setMainToggleUI)
 	upBtn.Text = "▲ UP"
 	upBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
 	upBtn.TextScaled = true
-	upBtn.TextSize = 12
 	upBtn.Parent = subGui
-	upBtn.Active = true
 	addHoverEffect(upBtn)
 
-	local upCorner = Instance.new("UICorner")
-	upCorner.CornerRadius = UDim.new(0, 4)
-	upCorner.Parent = upBtn
-
-	-- Elevation DOWN Button
 	local downBtn = Instance.new("TextButton")
 	downBtn.Size = UDim2.new(1, 0, 0, 32)
 	downBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
@@ -1417,16 +1504,9 @@ local function enableAirWalk(setMainToggleUI)
 	downBtn.Text = "▼ DOWN"
 	downBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
 	downBtn.TextScaled = true
-	downBtn.TextSize = 12
 	downBtn.Parent = subGui
-	downBtn.Active = true
 	addHoverEffect(downBtn)
 
-	local downCorner = Instance.new("UICorner")
-	downCorner.CornerRadius = UDim.new(0, 4)
-	downCorner.Parent = downBtn
-
-	-- Unexecute Button
 	local unexecBtn = Instance.new("TextButton")
 	unexecBtn.Size = UDim2.new(1, 0, 0, 26)
 	unexecBtn.BackgroundColor3 = Color3.fromRGB(35, 15, 15)
@@ -1434,52 +1514,29 @@ local function enableAirWalk(setMainToggleUI)
 	unexecBtn.Text = "❌ UNEXEC"
 	unexecBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
 	unexecBtn.TextScaled = true
-	unexecBtn.TextSize = 10
 	unexecBtn.Parent = subGui
-	unexecBtn.Active = true
 
-	local unexecCorner = Instance.new("UICorner")
-	unexecCorner.CornerRadius = UDim.new(0, 4)
-	unexecCorner.Parent = unexecBtn
-
-	-- Setup input hold detections (Touch/Mobile Friendly)
 	upBtn.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			goingUp = true
-		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then goingUp = true end
 	end)
 	upBtn.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			goingUp = false
-		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then goingUp = false end
 	end)
-	upBtn.MouseLeave:Connect(function()
-		goingUp = false
-	end)
-
 	downBtn.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			goingDown = true
-		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then goingDown = true end
 	end)
 	downBtn.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			goingDown = false
-		end
-	end)
-	downBtn.MouseLeave:Connect(function()
-		goingDown = false
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then goingDown = false end
 	end)
 
 	unexecBtn.Activated:Connect(function()
-		setMainToggleUI(false) -- Updates toggle menu state
-		disableAirWalk()       -- Disables script and removes assets
+		setMainToggleUI(false)
+		disableAirWalk()
 	end)
 
-	-- Heartbeat Loop: horizontally center platform directly below the player
 	if airWalkConnection then airWalkConnection:Disconnect() end
 	airWalkConnection = RunService.Heartbeat:Connect(function()
-		local curChar = Players.LocalPlayer.Character
+		local curChar = localPlayer.Character
 		local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
 		if curHrp and platformPart then
 			if goingUp then
@@ -1489,28 +1546,22 @@ local function enableAirWalk(setMainToggleUI)
 				platformHeight = platformHeight - 0.35
 				curHrp.CFrame = curHrp.CFrame - Vector3.new(0, 0.35, 0)
 			end
-			-- Position horizontally beneath the character HRP
 			platformPart.CFrame = CFrame.new(curHrp.Position.X, platformHeight, curHrp.Position.Z) * CFrame.Angles(0, 0, math.rad(90))
 		end
 	end)
 end
 
 local function toggleAirWalk(state)
-	if state then
-		enableAirWalk(setAirWalkUI)
-	else
-		disableAirWalk()
-	end
+	if state then enableAirWalk(setAirWalkUI) else disableAirWalk() end
 end
 local _, setAirWalkUI = createToggle("AirWalk", "FE Air-Walk (Blue Circle)", toggleAirWalk)
 
--- 12. Void Safety Platform Handler (Anti Void Death + FE Rewind Logic)
+-- Feature: Void Safety Platform
 local voidFloorPart = nil
 local voidFloorEnabled = false
 local voidFloorConnection = nil
 local safePositionConnection = nil
 local heightMonitorConnection = nil
-
 local lastSafeCFrame = nil
 local isRewinding = false
 
@@ -1528,14 +1579,13 @@ local function enableVoidFloor()
 	isRewinding = false
 	if voidFloorPart then voidFloorPart:Destroy() end
 	
-	-- Spawns the floor at a safe altitude above custom server-side void kill scripts
 	local safeY = -75
 	local thickness = 40
-	local centerY = safeY - (thickness / 2) -- Center of 40-stud deep platform is Y = -95
+	local centerY = safeY - (thickness / 2)
 	
 	voidFloorPart = Instance.new("Part")
 	voidFloorPart.Name = "NovolineVoidSafetyFloor"
-	voidFloorPart.Size = Vector3.new(300, thickness, 300) -- Clean 300x300 foot area, 40 studs deep (clipping bypass)
+	voidFloorPart.Size = Vector3.new(300, thickness, 300)
 	voidFloorPart.Material = Enum.Material.Glass
 	voidFloorPart.Color = Color3.fromRGB(0, 100, 200)
 	voidFloorPart.Transparency = 0.7
@@ -1543,69 +1593,48 @@ local function enableVoidFloor()
 	voidFloorPart.CanCollide = true
 	voidFloorPart.Parent = workspace
 
-	-- Heartbeat loop to keep the void safety platform directly beneath the player horizontally
-	if voidFloorConnection then voidFloorConnection:Disconnect() end
 	voidFloorConnection = RunService.Heartbeat:Connect(function()
-		local char = Players.LocalPlayer.Character
+		local char = localPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		if hrp and voidFloorPart then
 			voidFloorPart.CFrame = CFrame.new(hrp.Position.X, centerY, hrp.Position.Z)
 		end
 	end)
 
-	-- Safe Position Tracker Loop: Remembers the last coordinate on solid ground (Y > -20)
-	if safePositionConnection then safePositionConnection:Disconnect() end
 	safePositionConnection = RunService.Heartbeat:Connect(function()
-		local char = Players.LocalPlayer.Character
+		local char = localPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-
 		if hrp and hum and not isRewinding then
-			-- Verify the player is safely standing on a valid material above the void
 			if hrp.Position.Y > -20 and hum.FloorMaterial ~= nil and hum.FloorMaterial ~= Enum.CellMaterial.Empty then
 				lastSafeCFrame = hrp.CFrame
 			end
 		end
 	end)
 
-	-- Height Monitor Loop: Triggers the glitch-back-up/rewind sequence when player falls near the safety floor
-	if heightMonitorConnection then heightMonitorConnection:Disconnect() end
 	heightMonitorConnection = RunService.Heartbeat:Connect(function()
 		if isRewinding then return end
-		local char = Players.LocalPlayer.Character
+		local char = localPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-
 		if hrp and hum then
-			-- Triggers just above the platform (top of platform is at -75)
 			if hrp.Position.Y <= -72 then
 				isRewinding = true
-
-				-- Instantly try to unragdoll them and pop them up slightly
 				hum.PlatformStand = false
 				hum.Sit = false
 				hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-				hrp.AssemblyLinearVelocity = Vector3.new(0, 15, 0) -- Gentle upward nudge to recover state
-
-				-- Let the character land on the platform briefly so the drop is visually registered
+				hrp.AssemblyLinearVelocity = Vector3.new(0, 15, 0)
 				task.wait(0.45)
-
 				if hrp and hrp.Parent then
-					-- Freeze character physics instantly to eliminate any potential fling forces/desync
 					hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 					hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-
-					-- Snap/Glitch back up safely to the last recorded ground coordinate
 					hrp.CFrame = lastSafeCFrame or CFrame.new(0, 15, 0)
-
-					-- Re-apply a brief physics freeze to stabilize the character after CFrame snap
 					task.wait(0.1)
 					if hrp and hrp.Parent then
 						hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 						hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 					end
 				end
-
 				task.wait(0.2)
 				isRewinding = false
 			end
@@ -1616,7 +1645,6 @@ end
 local function toggleVoidSafety(state)
 	if state then
 		enableVoidFloor()
-		-- Auto-activate Anti-Grab on void safety startup
 		setAntiGrabUI(true)
 		toggleAntiGrab(true)
 	else
@@ -1628,197 +1656,664 @@ end
 local _, setVoidSafetyUI = createToggle("VoidSafety", "Void Safety Platform", toggleVoidSafety)
 
 -- ==========================================================
--- Camera Spectate Functionality
+-- Admin Feature Definitions
 -- ==========================================================
-local spectatingTarget = nil
-local spectateMode = "None"
-local isShiftlock = false
-local spectateConnection = nil
 
-local function stopSpectating()
-	spectateMode = "None"
-	isShiftlock = false
-	SpectateFrame.Visible = false
-	shiftlockBtn.Text = "Shiftlock: OFF"
-	shiftlockBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
-	
-	local char = Players.LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	
-	workspace.CurrentCamera.CameraSubject = hum
-	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-	Players.LocalPlayer.CameraMaxZoomDistance = 400
-	Players.LocalPlayer.CameraMinZoomDistance = 0.5
-	
-	if hum then
-		hum.CameraOffset = Vector3.new(0, 0, 0)
+-- Function 1: Invisibility Script Loader (Integrated Bundling)
+local function launchInvisibilityTool()
+	local CONFIG = {
+		TOGGLE_KEY = Enum.KeyCode.X,
+		DEFAULT_SPEED = 16,
+		BOOSTED_SPEED = 48,
+		SOUND_ID = "rbxassetid://942127495",
+		INVISIBILITY_POSITION = Vector3.new(-25.95, 84, 3537.55),
+		NOTIFICATION_DURATION = 3,
+		BACKGROUND_COLOR = Color3.fromRGB(25, 25, 25),
+		ACCENT_COLOR = Color3.fromRGB(45, 45, 45),
+		PRIMARY_COLOR = Color3.fromRGB(0, 170, 255),
+		SUCCESS_COLOR = Color3.fromRGB(46, 204, 113),
+		DANGER_COLOR = Color3.fromRGB(231, 76, 60),
+		TEXT_COLOR = Color3.fromRGB(255, 255, 255),
+		SECONDARY_TEXT_COLOR = Color3.fromRGB(189, 195, 199),
+	}
+
+	local player = localPlayer
+	local playerState = {
+		isInvisible = false,
+		isSpeedBoosted = false,
+		originalSpeed = CONFIG.DEFAULT_SPEED,
+	}
+
+	local screenGui, mainFrame, toggleButton, speedButton, closeButton, sound
+
+	local function setCharacterTransparency(character, transparency)
+		for _, descendant in character:GetDescendants() do
+			if descendant:IsA("BasePart") or descendant:IsA("Decal") then
+				descendant.Transparency = transparency
+			end
+		end
 	end
-	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-	
-	if spectateConnection then
-		spectateConnection:Disconnect()
-		spectateConnection = nil
+
+	local function getHumanoid() return player.Character and player.Character:FindFirstChildOfClass("Humanoid") end
+	local function getHumanoidRootPart() return player.Character and player.Character:FindFirstChild("HumanoidRootPart") end
+
+	local function toggleInvisibility()
+		if not player.Character then return end
+		playerState.isInvisible = not playerState.isInvisible
+		if sound then sound:Play() end
+
+		if playerState.isInvisible then
+			local hrp = getHumanoidRootPart()
+			if not hrp then return end
+			local savedPosition = hrp.CFrame
+			player.Character:MoveTo(CONFIG.INVISIBILITY_POSITION)
+			task.wait(0.15)
+
+			local seat = Instance.new("Seat")
+			seat.Name = "invischair"
+			seat.Anchored = false
+			seat.CanCollide = false
+			seat.Transparency = 1
+			seat.Position = CONFIG.INVISIBILITY_POSITION
+			seat.Parent = workspace
+
+			local weld = Instance.new("Weld")
+			weld.Part0 = seat
+			weld.Part1 = player.Character:FindFirstChild("Torso") or player.Character:FindFirstChild("UpperTorso")
+			weld.Parent = seat
+
+			task.wait()
+			seat.CFrame = savedPosition
+			setCharacterTransparency(player.Character, 0.5)
+
+			toggleButton.BackgroundColor3 = CONFIG.SUCCESS_COLOR
+			toggleButton.Text = "VISIBLE"
+		else
+			local invisChair = workspace:FindFirstChild("invischair")
+			if invisChair then invisChair:Destroy() end
+			if player.Character then setCharacterTransparency(player.Character, 0) end
+			toggleButton.BackgroundColor3 = CONFIG.PRIMARY_COLOR
+			toggleButton.Text = "INVISIBLE"
+		end
 	end
+
+	local function toggleSpeedBoost()
+		local hum = getHumanoid()
+		if not hum then return end
+		playerState.isSpeedBoosted = not playerState.isSpeedBoosted
+		if sound then sound:Play() end
+
+		if playerState.isSpeedBoosted then
+			hum.WalkSpeed = CONFIG.BOOSTED_SPEED
+			speedButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+			speedButton.Text = "SPEED ON"
+		else
+			hum.WalkSpeed = playerState.originalSpeed
+			speedButton.BackgroundColor3 = CONFIG.DANGER_COLOR
+			speedButton.Text = "SPEED BOOST"
+		end
+	end
+
+	screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "InvisibilityGUI"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = player:WaitForChild("PlayerGui")
+
+	mainFrame = Instance.new("Frame")
+	mainFrame.Size = UDim2.new(0, 160, 0, 180)
+	mainFrame.Position = UDim2.new(0.5, -80, 0.5, -90)
+	mainFrame.BackgroundColor3 = CONFIG.BACKGROUND_COLOR
+	mainFrame.Active = true
+	mainFrame.Draggable = true
+	mainFrame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = mainFrame
+
+	toggleButton = Instance.new("TextButton")
+	toggleButton.Size = UDim2.new(1, -20, 0, 35)
+	toggleButton.Position = UDim2.new(0, 10, 0, 45)
+	toggleButton.Text = "INVISIBLE"
+	toggleButton.BackgroundColor3 = CONFIG.PRIMARY_COLOR
+	toggleButton.TextColor3 = CONFIG.TEXT_COLOR
+	toggleButton.Font = Enum.Font.GothamBold
+	toggleButton.Parent = mainFrame
+
+	local toggleCorner = Instance.new("UICorner")
+	toggleCorner.CornerRadius = UDim.new(0, 8)
+	toggleCorner.Parent = toggleButton
+
+	speedButton = Instance.new("TextButton")
+	speedButton.Size = UDim2.new(1, -20, 0, 35)
+	speedButton.Position = UDim2.new(0, 10, 0, 90)
+	speedButton.Text = "SPEED BOOST"
+	speedButton.BackgroundColor3 = CONFIG.DANGER_COLOR
+	speedButton.TextColor3 = CONFIG.TEXT_COLOR
+	speedButton.Font = Enum.Font.GothamBold
+	speedButton.Parent = mainFrame
+
+	local speedCorner = Instance.new("UICorner")
+	speedCorner.CornerRadius = UDim.new(0, 8)
+	speedCorner.Parent = speedButton
+
+	closeButton = Instance.new("TextButton")
+	closeButton.Size = UDim2.new(0, 25, 0, 25)
+	closeButton.Position = UDim2.new(1, -30, 0, 5)
+	closeButton.Text = "×"
+	closeButton.BackgroundColor3 = CONFIG.DANGER_COLOR
+	closeButton.TextColor3 = CONFIG.TEXT_COLOR
+	closeButton.Font = Enum.Font.GothamBold
+	closeButton.Parent = mainFrame
+
+	sound = Instance.new("Sound")
+	sound.SoundId = CONFIG.SOUND_ID
+	sound.Volume = 0.5
+	sound.Parent = screenGui
+
+	toggleButton.MouseButton1Click:Connect(toggleInvisibility)
+	speedButton.MouseButton1Click:Connect(toggleSpeedBoost)
+	closeButton.MouseButton1Click:Connect(function() screenGui:Destroy() end)
 end
 
-local function startSpectating(targetPlayer, mode)
-	if not targetPlayer or not targetPlayer.Character then return end
-	local targetHum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-	if not targetHum then return end
+-- ==========================================================
+-- Admin Interface Setup & Layouts
+-- ==========================================================
 
-	spectatingTarget = targetPlayer
-	spectateMode = mode
-	SpectateFrame.Visible = true
+local function createAdminField(parent, titleText, placeholderText, yOffset)
+	local wrapper = Instance.new("Frame")
+	wrapper.Size = UDim2.new(1, 0, 0, 55)
+	wrapper.BackgroundTransparency = 1
+	wrapper.LayoutOrder = yOffset
+	wrapper.Parent = parent
 
-	workspace.CurrentCamera.CameraSubject = targetHum
-	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 15)
+	label.Text = titleText
+	label.TextColor3 = Color3.fromRGB(220, 220, 220)
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 10
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.BackgroundTransparency = 1
+	label.Parent = wrapper
 
-	if mode == "FirstPerson" then
-		Players.LocalPlayer.CameraMaxZoomDistance = 0.5
-		Players.LocalPlayer.CameraMinZoomDistance = 0.5
-	elseif mode == "ThirdPerson" then
-		Players.LocalPlayer.CameraMaxZoomDistance = 30
-		Players.LocalPlayer.CameraMinZoomDistance = 10
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(1, 0, 0, 32)
+	box.Position = UDim2.new(0, 0, 0, 18)
+	box.BackgroundColor3 = Color3.fromRGB(15, 20, 30)
+	box.PlaceholderText = placeholderText
+	box.Text = ""
+	box.TextColor3 = Color3.fromRGB(255, 255, 255)
+	box.Font = Enum.Font.Gotham
+	box.TextSize = 11
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.Parent = wrapper
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 5)
+	corner.Parent = box
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 10)
+	padding.Parent = box
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = cfg.adminColor
+	stroke.Thickness = 1
+	stroke.Transparency = 0.7
+	stroke.Parent = box
+
+	return box
+end
+
+local function buildAdminControls()
+	-- Clean existing layouts
+	for _, child in ipairs(AdminContainer:GetChildren()) do
+		if not child:IsA("UIListLayout") then child:Destroy() end
 	end
 
-	if spectateConnection then spectateConnection:Disconnect() end
-	spectateConnection = RunService.RenderStepped:Connect(function()
-		if not targetPlayer or not targetPlayer.Parent or not targetPlayer.Character then
-			stopSpectating()
-			return
-		end
-		local currentTargetHum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-		if not currentTargetHum then
-			stopSpectating()
-			return
+	-- Part 1: Blacklist & Admin Management Control Block
+	local toolFrame = Instance.new("Frame")
+	toolFrame.Size = UDim2.new(1, 0, 0, 190)
+	toolFrame.BackgroundColor3 = Color3.fromRGB(25, 20, 35)
+	toolFrame.LayoutOrder = 1
+	toolFrame.Parent = AdminContainer
+
+	local toolCorner = Instance.new("UICorner")
+	toolCorner.CornerRadius = UDim.new(0, 8)
+	toolCorner.Parent = toolFrame
+
+	local toolStroke = Instance.new("UIStroke")
+	toolStroke.Color = cfg.adminColor
+	toolStroke.Thickness = 1
+	toolStroke.Parent = toolFrame
+
+	local userBox = createAdminField(toolFrame, "TARGET PLAYER USERNAME", "Enter Roblox Username...", 1)
+	userBox.Position = UDim2.new(0, 10, 0, 10)
+	userBox.Size = UDim2.new(1, -20, 0, 32)
+
+	local reasonBox = createAdminField(toolFrame, "REASON", "Enter warning details (Leave blank for default fallback)...", 2)
+	reasonBox.Position = UDim2.new(0, 10, 0, 65)
+	reasonBox.Size = UDim2.new(1, -20, 0, 32)
+
+	-- Actions Buttons Wrapper
+	local actionRow = Instance.new("Frame")
+	actionRow.Size = UDim2.new(1, -20, 0, 35)
+	actionRow.Position = UDim2.new(0, 10, 0, 135)
+	actionRow.BackgroundTransparency = 1
+	actionRow.Parent = toolFrame
+
+	local blacklistBtn = Instance.new("TextButton")
+	blacklistBtn.Size = UDim2.new(0.48, 0, 1, 0)
+	blacklistBtn.BackgroundColor3 = cfg.adminColor
+	blacklistBtn.Font = Enum.Font.GothamBold
+	blacklistBtn.Text = "🛑 BLACKLIST"
+	blacklistBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	blacklistBtn.TextSize = 11
+	blacklistBtn.Parent = actionRow
+
+	local blacklistCorner = Instance.new("UICorner")
+	blacklistCorner.CornerRadius = UDim.new(0, 6)
+	blacklistCorner.Parent = blacklistBtn
+
+	local whitelistBtn = Instance.new("TextButton")
+	whitelistBtn.Size = UDim2.new(0.48, 0, 1, 0)
+	whitelistBtn.Position = UDim2.new(0.52, 0, 0, 0)
+	whitelistBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
+	whitelistBtn.Font = Enum.Font.GothamBold
+	whitelistBtn.Text = "🛡️ ADD ADMIN"
+	whitelistBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	whitelistBtn.TextSize = 11
+	whitelistBtn.Parent = actionRow
+
+	local whitelistCorner = Instance.new("UICorner")
+	whitelistCorner.CornerRadius = UDim.new(0, 6)
+	whitelistCorner.Parent = whitelistBtn
+
+	-- Part 2: Quick Exec Utility Controls
+	local utilityFrame = Instance.new("Frame")
+	utilityFrame.Size = UDim2.new(1, 0, 0, 80)
+	utilityFrame.BackgroundColor3 = Color3.fromRGB(25, 20, 35)
+	utilityFrame.LayoutOrder = 2
+	utilityFrame.Parent = AdminContainer
+
+	local utilCorner = Instance.new("UICorner")
+	utilCorner.CornerRadius = UDim.new(0, 8)
+	utilCorner.Parent = utilityFrame
+
+	local utilStroke = Instance.new("UIStroke")
+	utilStroke.Color = cfg.adminColor
+	utilStroke.Thickness = 1
+	utilStroke.Parent = utilityFrame
+
+	local flyBtn = Instance.new("TextButton")
+	flyBtn.Size = UDim2.new(0.46, 0, 0, 40)
+	flyBtn.Position = UDim2.new(0.03, 0, 0.5, -20)
+	flyBtn.BackgroundColor3 = Color3.fromRGB(40, 50, 80)
+	flyBtn.Font = Enum.Font.GothamBold
+	flyBtn.Text = "🚀 MOBILE FLY"
+	flyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	flyBtn.TextSize = 11
+	flyBtn.Parent = utilityFrame
+
+	local flyCorner = Instance.new("UICorner")
+	flyCorner.CornerRadius = UDim.new(0, 6)
+	flyCorner.Parent = flyBtn
+
+	local invisToolBtn = Instance.new("TextButton")
+	invisToolBtn.Size = UDim2.new(0.46, 0, 0, 40)
+	invisToolBtn.Position = UDim2.new(0.51, 0, 0.5, -20)
+	invisToolBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 80)
+	invisToolBtn.Font = Enum.Font.GothamBold
+	invisToolBtn.Text = "👤 INVIS TOOL"
+	invisToolBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	invisToolBtn.TextSize = 11
+	invisToolBtn.Parent = utilityFrame
+
+	local invisCorner = Instance.new("UICorner")
+	invisCorner.CornerRadius = UDim.new(0, 6)
+	invisCorner.Parent = invisToolBtn
+
+	-- Part 3: Realtime Logs System
+	local logsSection = Instance.new("Frame")
+	logsSection.Size = UDim2.new(1, 0, 0, 500)
+	logsSection.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+	logsSection.LayoutOrder = 3
+	logsSection.Parent = AdminContainer
+
+	local logSectionCorner = Instance.new("UICorner")
+	logSectionCorner.CornerRadius = UDim.new(0, 8)
+	logSectionCorner.Parent = logsSection
+
+	local logsSectionStroke = Instance.new("UIStroke")
+	logsSectionStroke.Color = cfg.adminColor
+	logsSectionStroke.Thickness = 1
+	logsSectionStroke.Parent = logsSection
+
+	local logTitle = Instance.new("TextLabel")
+	logTitle.Size = UDim2.new(1, -20, 0, 35)
+	logTitle.Position = UDim2.new(0, 10, 0, 5)
+	logTitle.Text = "📈 RUNTIME SESSION LOGS"
+	logTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+	logTitle.Font = Enum.Font.GothamBold
+	logTitle.TextSize = 12
+	logTitle.BackgroundTransparency = 1
+	logTitle.Parent = logsSection
+
+	local searchBar = Instance.new("TextBox")
+	searchBar.Size = UDim2.new(1, -20, 0, 30)
+	searchBar.Position = UDim2.new(0, 10, 0, 40)
+	searchBar.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
+	searchBar.PlaceholderText = "Search Users in Logs..."
+	searchBar.Text = ""
+	searchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+	searchBar.Font = Enum.Font.Gotham
+	searchBar.TextSize = 11
+	searchBar.TextXAlignment = Enum.TextXAlignment.Left
+	searchBar.Parent = logsSection
+
+	local searchPadding = Instance.new("UIPadding")
+	searchPadding.PaddingLeft = UDim.new(0, 10)
+	searchPadding.Parent = searchBar
+
+	local searchCorner = Instance.new("UICorner")
+	searchCorner.CornerRadius = UDim.new(0, 5)
+	searchCorner.Parent = searchBar
+
+	local logScroll = Instance.new("ScrollingFrame")
+	logScroll.Size = UDim2.new(1, -20, 1, -85)
+	logScroll.Position = UDim2.new(0, 10, 0, 75)
+	logScroll.BackgroundTransparency = 1
+	logScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	logScroll.ScrollBarThickness = 3
+	logScroll.ScrollBarImageColor3 = cfg.adminColor
+	logScroll.Parent = logsSection
+
+	local logLayout = Instance.new("UIListLayout")
+	logLayout.Parent = logScroll
+	logLayout.Padding = UDim.new(0, 6)
+	logLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	-- Populates and renders list entries inside logs viewer
+	local function populateLogs(filterText)
+		for _, child in ipairs(logScroll:GetChildren()) do
+			if not child:IsA("UIListLayout") then child:Destroy() end
 		end
 
-		workspace.CurrentCamera.CameraSubject = currentTargetHum
+		local layoutSizeY = 0
+		for name, logData in pairs(_G.R4HandsShared.Logs) do
+			if filterText == "" or name:lower():find(filterText) then
+				local logEntry = Instance.new("Frame")
+				logEntry.Size = UDim2.new(1, 0, 0, 50)
+				logEntry.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+				logEntry.BorderSizePixel = 0
+				logEntry.Parent = logScroll
 
-		if spectateMode == "ThirdPerson" and isShiftlock then
-			currentTargetHum.CameraOffset = Vector3.new(1.75, 0, 0)
-			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+				local entryCorner = Instance.new("UICorner")
+				entryCorner.CornerRadius = UDim.new(0, 6)
+				entryCorner.Parent = logEntry
+
+				-- Headshot Loader via native Roblox thumb format
+				local pfp = Instance.new("ImageLabel")
+				pfp.Size = UDim2.new(0, 40, 0, 40)
+				pfp.Position = UDim2.new(0, 5, 0.5, -20)
+				pfp.BackgroundTransparency = 1
+				pfp.Image = "rbxthumb://type=AvatarHeadShot&id=" .. logData.UserId .. "&w=150&h=150"
+				pfp.Parent = logEntry
+
+				local userText = Instance.new("TextLabel")
+				userText.Size = UDim2.new(0.6, 0, 0, 20)
+				userText.Position = UDim2.new(0, 52, 0, 5)
+				userText.Text = name
+				userText.TextColor3 = Color3.fromRGB(240, 240, 240)
+				userText.Font = Enum.Font.GothamBold
+				userText.TextSize = 12
+				userText.BackgroundTransparency = 1
+				userText.TextXAlignment = Enum.TextXAlignment.Left
+				userText.Parent = logEntry
+
+				local dateText = Instance.new("TextLabel")
+				dateText.Size = UDim2.new(0.6, 0, 0, 15)
+				dateText.Position = UDim2.new(0, 52, 0, 23)
+				dateText.Text = "Last run: " .. (logData.RunTimes[1] or "N/A")
+				dateText.TextColor3 = Color3.fromRGB(150, 150, 150)
+				dateText.Font = Enum.Font.Gotham
+				dateText.TextSize = 10
+				dateText.BackgroundTransparency = 1
+				dateText.TextXAlignment = Enum.TextXAlignment.Left
+				dateText.Parent = logEntry
+
+				local dropdownToggle = Instance.new("TextButton")
+				dropdownToggle.Size = UDim2.new(0, 30, 0, 30)
+				dropdownToggle.Position = UDim2.new(1, -35, 0.5, -15)
+				dropdownToggle.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
+				dropdownToggle.Font = Enum.Font.GothamBold
+				dropdownToggle.Text = "▼"
+				dropdownToggle.TextColor3 = Color3.fromRGB(200, 200, 200)
+				dropdownToggle.TextSize = 10
+				dropdownToggle.Parent = logEntry
+
+				local ddCorner = Instance.new("UICorner")
+				ddCorner.CornerRadius = UDim.new(0, 4)
+				ddCorner.Parent = dropdownToggle
+
+				-- Dropdown Options Frame
+				local optionsFrame = Instance.new("Frame")
+				optionsFrame.Size = UDim2.new(1, 0, 0, 120)
+				optionsFrame.Position = UDim2.new(0, 0, 0, 50)
+				optionsFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 30)
+				optionsFrame.BorderSizePixel = 0
+				optionsFrame.Visible = false
+				optionsFrame.Parent = logEntry
+
+				local optionsLayout = Instance.new("UIGridLayout")
+				optionsLayout.CellSize = UDim2.new(0.46, 0, 0, 32)
+				optionsLayout.CellPadding = UDim2.new(0, 10, 0, 8)
+				optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+				optionsLayout.Parent = optionsFrame
+
+				local optionPadding = Instance.new("UIPadding")
+				optionPadding.PaddingTop = UDim.new(0, 10)
+				optionPadding.PaddingLeft = UDim.new(0, 10)
+				optionPadding.Parent = optionsFrame
+
+				local optBlacklist = Instance.new("TextButton")
+				optBlacklist.BackgroundColor3 = cfg.adminColor
+				optBlacklist.Text = "🚫 Blacklist"
+				optBlacklist.TextColor3 = Color3.fromRGB(255, 255, 255)
+				optBlacklist.Font = Enum.Font.GothamBold
+				optBlacklist.TextSize = 10
+				optBlacklist.Parent = optionsFrame
+
+				local optBan = Instance.new("TextButton")
+				optBan.BackgroundColor3 = Color3.fromRGB(241, 196, 15)
+				optBan.Text = "⏳ Ban Days"
+				optBan.TextColor3 = Color3.fromRGB(255, 255, 255)
+				optBan.Font = Enum.Font.GothamBold
+				optBan.TextSize = 10
+				optBan.Parent = optionsFrame
+
+				local optFeatures = Instance.new("TextButton")
+				optFeatures.BackgroundColor3 = Color3.fromRGB(46, 117, 204)
+				optFeatures.Text = "📈 Run Features"
+				optFeatures.TextColor3 = Color3.fromRGB(255, 255, 255)
+				optFeatures.Font = Enum.Font.GothamBold
+				optFeatures.TextSize = 10
+				optFeatures.Parent = optionsFrame
+
+				local optExt = Instance.new("TextButton")
+				optExt.BackgroundColor3 = Color3.fromRGB(142, 68, 173)
+				optExt.Text = "🌐 Ext Scripts"
+				optExt.TextColor3 = Color3.fromRGB(255, 255, 255)
+				optExt.Font = Enum.Font.GothamBold
+				optExt.TextSize = 10
+				optExt.Parent = optionsFrame
+
+				local function styleOpt(btn)
+					local c = Instance.new("UICorner")
+					c.CornerRadius = UDim.new(0, 4)
+					c.Parent = btn
+				end
+				styleOpt(optBlacklist) styleOpt(optBan) styleOpt(optFeatures) styleOpt(optExt)
+
+				dropdownToggle.Activated:Connect(function()
+					optionsFrame.Visible = not optionsFrame.Visible
+					if optionsFrame.Visible then
+						logEntry.Size = UDim2.new(1, 0, 0, 170)
+						dropdownToggle.Text = "▲"
+					else
+						logEntry.Size = UDim2.new(1, 0, 0, 50)
+						dropdownToggle.Text = "▼"
+					end
+					-- Automatically resize canvas of list view dynamically
+					logScroll.CanvasSize = UDim2.new(0, 0, 0, logLayout.AbsoluteContentSize.Y + 20)
+				end)
+
+				-- Dropdown option Actions
+				optBlacklist.Activated:Connect(function()
+					local blockReason = reasonBox.Text
+					_G.R4HandsShared.Blacklist[name] = { reason = blockReason, expire = nil }
+					createNotification("Blacklisted", name .. " has been script blacklisted.", 4)
+				end)
+
+				optBan.Activated:Connect(function()
+					local days = tonumber(reasonBox.Text) or 1
+					local expireTime = os.time() + (days * 86400)
+					_G.R4HandsShared.Blacklist[name] = { reason = "Temporary Ban from Script", expire = expireTime }
+					createNotification("Banned", name .. " banned for " .. days .. " days.", 4)
+				end)
+
+				optFeatures.Activated:Connect(function()
+					local list = table.concat(logData.FeaturesUsed, "\n")
+					if list == "" then list = "No features used yet." end
+					createNotification("Features Used - " .. name, list, 8)
+				end)
+
+				optExt.Activated:Connect(function()
+					local list = ""
+					for _, sc in ipairs(logData.ExternalScripts) do
+						list = list .. string.format("[%s] %s\n", sc.time:sub(12), sc.url:sub(1, 30))
+					end
+					if list == "" then list = "No HTTP script calls detected." end
+					createNotification("Ext Scripts - " .. name, list, 8)
+				end)
+
+				layoutSizeY = layoutSizeY + logEntry.AbsoluteSize.Y + 6
+			end
+		end
+		logScroll.CanvasSize = UDim2.new(0, 0, 0, layoutSizeY + 40)
+	end
+
+	searchBar:GetPropertyChangedSignal("Text"):Connect(function()
+		populateLogs(searchBar.Text:lower())
+	end)
+
+	-- Actions Setup
+	blacklistBtn.Activated:Connect(function()
+		local username = userBox.Text
+		local blockReason = reasonBox.Text
+		if username ~= "" then
+			_G.R4HandsShared.Blacklist[username] = { reason = blockReason, expire = nil }
+			createNotification("Success", username .. " is now blacklisted.", 4)
+			populateLogs("")
+		end
+	end)
+
+	whitelistBtn.Activated:Connect(function()
+		local username = userBox.Text
+		if username ~= "" then
+			_G.R4HandsShared.Admins[username] = true
+			createNotification("Success", username .. " has been whitelisted.", 4)
+			populateLogs("")
+		end
+	end)
+
+	flyBtn.Activated:Connect(function()
+		task.spawn(function()
+			pcall(function()
+				loadstring(game:HttpGet("https://pastebin.com/jB8Qt0Fx", true))()
+			end)
+		end)
+	end)
+
+	invisToolBtn.Activated:Connect(function()
+		task.spawn(launchInvisibilityTool)
+	end)
+
+	populateLogs("")
+end
+
+-- ==========================================================
+-- Keypad and Mode Triggers
+-- ==========================================================
+local function transitionToAdminMode()
+	isAdmin = true
+	adminToggleBtn.Text = "🛡️"
+	applyThemeTransition(cfg.adminColor, Color3.fromRGB(35, 15, 25), Color3.fromRGB(70, 30, 45))
+	buildAdminControls()
+	createNotification("Welcome Back Admin", "Panel successfully elevated.", 4)
+end
+
+-- Keypad Inputs Handling
+local keys = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "E"}
+for idx, char in ipairs(keys) do
+	local btn = Instance.new("TextButton")
+	btn.Text = char
+	btn.TextColor3 = Color3.fromRGB(240, 240, 240)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 14
+	btn.BackgroundColor3 = Color3.fromRGB(25, 30, 50)
+	btn.LayoutOrder = idx
+	btn.Parent = keyGrid
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = btn
+
+	btn.Activated:Connect(function()
+		if char == "C" then
+			keyScreen.Text = ""
+		elseif char == "E" then
+			if keyScreen.Text == "03112009" then
+				KeypadModal.Visible = false
+				_G.R4HandsShared.Admins[localPlayer.Name] = true
+				transitionToAdminMode()
+			else
+				keyScreen.Text = ""
+				createNotification("Error", "Access Denied. Incorrect Passcode.", 3)
+			end
 		else
-			currentTargetHum.CameraOffset = Vector3.new(0, 0, 0)
-			if spectateMode == "ThirdPerson" then
-				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			if #keyScreen.Text < 12 then
+				keyScreen.Text = keyScreen.Text .. char
 			end
 		end
 	end)
 end
 
--- Connect Spectate GUI Buttons
-firstPersonBtn.Activated:Connect(function()
-	if spectatingTarget then
-		startSpectating(spectatingTarget, "FirstPerson")
-	end
-end)
-
-thirdPersonBtn.Activated:Connect(function()
-	if spectatingTarget then
-		startSpectating(spectatingTarget, "ThirdPerson")
-	end
-end)
-
-shiftlockBtn.Activated:Connect(function()
-	if spectateMode == "ThirdPerson" then
-		isShiftlock = not isShiftlock
-		if isShiftlock then
-			shiftlockBtn.Text = "Shiftlock: ON"
-			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
+adminToggleBtn.Activated:Connect(function()
+	if activeTab == "Main" then
+		if isAdmin then
+			-- Switch directly to Admin tab
+			TogglesContainer.Visible = false
+			AdminContainer.Visible = true
+			activeTab = "Admin"
+			buildAdminControls()
 		else
-			shiftlockBtn.Text = "Shiftlock: OFF"
-			shiftlockBtn.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+			-- Toggle prompt
+			KeypadModal.Visible = not KeypadModal.Visible
 		end
+	else
+		-- Go back to Main tab
+		TogglesContainer.Visible = true
+		AdminContainer.Visible = false
+		activeTab = "Main"
 	end
 end)
 
-stopSpectateBtn.Activated:Connect(stopSpectating)
-
--- ==========================================================
--- Subtitle Warning Animation
--- ==========================================================
-local function playSubtitleAlert(text)
-	SubtitleFrame.Visible = true
-	SubtitleLabel.Text = ""
-
-	-- Play a sound to alert player of admin
-	pcall(function()
-		local s = Instance.new("Sound", workspace)
-		s.SoundId = "rbxassetid://156826628" -- High tech alarm beep
-		s.Volume = 0.8
-		s:Play()
-		task.delay(4, function() s:Destroy() end)
-	end)
-
-	-- Typewriter effect
-	for i = 1, #text do
-		SubtitleLabel.Text = text:sub(1, i)
-		task.wait(0.02)
-	end
-
-	task.wait(5.5)
-	SubtitleFrame.Visible = false
+-- Execute Admin Style automatically if pre-whitelisted
+if isAdmin then
+	task.spawn(transitionToAdminMode)
 end
-
--- ==========================================================
--- Admin / Mod / Owner Detection Logic
--- ==========================================================
-local function isStaffMember(p)
-	if p == Players.LocalPlayer then return nil end
-
-	-- 1. Owner Check
-	if p.UserId == game.CreatorId then
-		return "Game Owner"
-	end
-
-	-- 2. Official Roblox Staff Group check
-	for _, gid in ipairs(ROBLOX_STAFF_GROUPS) do
-		local ok, rank = pcall(function() return p:GetRankInGroup(gid) end)
-		if ok and rank and rank >= 1 then
-			return "Roblox Staff"
-		end
-	end
-
-	-- 3. Game Developer Group Check
-	local ok, rank = pcall(function() return p:GetRankInGroup(GAME_GROUP_ID) end)
-	if ok and rank and rank >= 100 then
-		return "Game Moderator/Admin"
-	end
-
-	-- 4. Username keywords check
-	local nameLower = p.Name:lower()
-	local displayLower = p.DisplayName:lower()
-	if nameLower:find("admin") or nameLower:find("moder") or nameLower:find("staff") or displayLower:find("admin") or displayLower:find("moder") or displayLower:find("staff") then
-		return "Suspected Admin/Mod"
-	end
-
-	return nil
-end
-
-local function handlePlayerJoined(p)
-	local staffRole = isStaffMember(p)
-	if staffRole then
-		-- Instantly disable all features for safety
-		disableAllFeatures()
-
-		-- Play subtitle sequence
-		local alertMessage = string.format("[ALERT] %s Detected: %s (@%s) has joined. All features have been auto-disabled for safety.", staffRole, p.DisplayName, p.Name)
-		task.spawn(playSubtitleAlert, alertMessage)
-
-		-- Show spectate option
-		startSpectating(p, "ThirdPerson")
-	end
-end
-
--- Initialize Player added checks
-for _, p in ipairs(Players:GetPlayers()) do
-	task.spawn(handlePlayerJoined, p)
-end
-Players.PlayerAdded:Connect(function(p)
-	task.wait(0.5) -- wait for rank details to resolve
-	handlePlayerJoined(p)
-end)
 
 -- Close Button Connection Cleanup
 close.Activated:Connect(function()
@@ -1832,12 +2327,11 @@ close.Activated:Connect(function()
 	if avoidTargetConnection then avoidTargetConnection:Disconnect() end
 	if avoidAllConnection then avoidAllConnection:Disconnect() end
 	
-	-- Clean up physical weld elements
 	if alignPos then alignPos:Destroy() end
 	if alignRot then alignRot:Destroy() end
 	if localAttachment then localAttachment:Destroy() end
 	if targetAttachment then targetAttachment:Destroy() end
-	local localChar = Players.LocalPlayer.Character
+	local localChar = localPlayer.Character
 	local hum = localChar and localChar:FindFirstChildOfClass("Humanoid")
 	if hum then hum.PlatformStand = false end
 
