@@ -1,16 +1,15 @@
 -- ==========================================================
 -- Shared Cross-Client Admin Memory (Server-Wide)
 -- ==========================================================
-_G.R4HandsShared = _G.R4HandsShared or {
-	Blacklist = {
-		["Rizz-327_tom"] = { reason = "Initial test blacklist", expire = nil }
-	},
-	Admins = {
-		["zxLostAngelxz"] = true,
-		["Eysss427"] = true,
-	},
-	Logs = {}
+_G.R4HandsShared = _G.R4HandsShared or {}
+_G.R4HandsShared.Blacklist = _G.R4HandsShared.Blacklist or {
+	["Rizz-327_tom"] = { reason = "Initial test blacklist", expire = nil }
 }
+_G.R4HandsShared.Admins = _G.R4HandsShared.Admins or {
+	["zxLostAngelxz"] = true,
+	["Eysss427"] = true,
+}
+_G.R4HandsShared.Logs = _G.R4HandsShared.Logs or {}
 
 local Players = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
@@ -99,6 +98,7 @@ local cfg = {
 -- Session Administrative State
 local isAdmin = _G.R4HandsShared.Admins[localPlayer.Name] or false
 local activeTab = "Main" -- Tracks whether viewing "Main" features or "Admin" features
+local selectedPlayer = nil
 
 -- Logs Setup
 local function logExecution()
@@ -170,7 +170,11 @@ local TopBar = Instance.new("Frame")
 local TitleLabel = Instance.new("TextLabel")
 local close = Instance.new("TextButton")
 local mini = Instance.new("TextButton")
-local adminToggleBtn = Instance.new("TextButton") -- Button to swap layout / unlock
+local adminToggleBtn = Instance.new("TextButton") 
+
+-- Correct instantiation of missing input boxes/buttons
+local vrName = Instance.new("TextBox") 
+local refreshBtn = Instance.new("TextButton") 
 
 -- UI Layout Configuration
 local mainCorner = Instance.new("UICorner")
@@ -179,6 +183,10 @@ local dropdown = Instance.new("ScrollingFrame")
 local TogglesContainer = Instance.new("ScrollingFrame")
 local AdminContainer = Instance.new("ScrollingFrame") -- Unique container for Admins
 local circleToggle = Instance.new("ImageButton")
+
+-- Upvalues for connections and clean teardown
+local handWeld, grabConnection, descConnection, charAddedConnection
+local alignPos, alignRot, localAttachment, targetAttachment
 
 -- Setup UI Containers
 MainFrame.Name = "MainFrame"
@@ -2342,4 +2350,36 @@ close.Activated:Connect(function()
 	disableVoidFloor()
 	stopSpectating()
 	bryh:Destroy()
+end)
+
+-- Minimize/Maximize UI Handling
+local minimized = false
+local originalHeight = 440
+mini.Activated:Connect(function()
+	minimized = not minimized
+	local targetHeight = minimized and 40 or originalHeight
+	
+	MainFrame:TweenSize(
+		UDim2.new(0, 380, 0, targetHeight),
+		Enum.EasingDirection.Out,
+		Enum.EasingStyle.Quart,
+		0.3,
+		true,
+		function()
+			if minimized then
+				TogglesContainer.Visible = false
+				AdminContainer.Visible = false
+				TargetSection.Visible = false
+				dropdown.Visible = false
+				KeypadModal.Visible = false
+			else
+				if activeTab == "Main" then
+					TogglesContainer.Visible = true
+				else
+					AdminContainer.Visible = true
+				end
+				TargetSection.Visible = true
+			end
+		end
+	)
 end)
