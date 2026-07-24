@@ -1891,6 +1891,3 @@ unexecBtnMain.Activated:Connect(function()
 	-- Safely fires all cleaning processes before closure
 	close:Activate()
 end)
-
-the script got cut off at the bottom near the annoy function and then some other parts have been cut off so could you please send the full script with all these changes and fix the cutoff? 
-and u can look at the video u can see the circle button is not working anymore once i tap on it.
