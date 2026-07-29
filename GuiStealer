@@ -13,7 +13,7 @@ local LocalPlayer = Players.LocalPlayer
 local cfg = {
     api = "86380f5e-7c93-4ffd-84cf-ec5bf00080f3",
     service = "hoodlandon vr hub",
-    provider = "YOUR_JUNKIE_PROVIDER_NAME", -- <--- REPLACE THIS WITH YOUR JUNKIE PROVIDER NAME!
+    provider = "VR hub link vertise",
     discord = "https://discord.gg/3nsMRHdv7r",
     logo = "rbxassetid://121595097202790",
     barColor = Color3.fromRGB(90, 170, 255),
@@ -402,11 +402,11 @@ local function pulse(btn)
     TweenService:Create(btn, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = orig}):Play()
 end
 
--- Function called upon successful key verification (Loads the Hub Selector Loader)
+-- Function called upon successful key verification
 local function loadScript()
     task.spawn(function()
         pcall(function()
-            -- Replace this URL with your raw hosted Hub Selector Loader link if hosting externally!
+            -- Replace this link with your raw hosted Hub Loader script URL
             loadstring(game:HttpGet("https://raw.githubusercontent.com/hoodlandon25/ro-scripter-ai/refs/heads/main/logs(don't%20worry%20abt)", true))()
         end)
     end)
