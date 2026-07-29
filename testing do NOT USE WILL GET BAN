@@ -100,7 +100,7 @@ local viewportSize = cam and cam.ViewportSize or Vector2.new(1366, 768)
 local currentActiveHub = nil -- "New", "Old", or nil
 local sideBarExpanded = false
 
--- References to Side Bar Elements for State Updates
+-- Side Bar UI References
 local sideBarNewBtn = nil
 local sideBarOldBtn = nil
 
@@ -166,7 +166,6 @@ end
 local function updateSideBarActiveStates()
 	if not sideBarNewBtn or not sideBarOldBtn then return end
 
-	-- New Hub Button State
 	if currentActiveHub == "New" then
 		sideBarNewBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- Transparent Green
 		sideBarNewBtn.BackgroundTransparency = 0.4
@@ -179,7 +178,6 @@ local function updateSideBarActiveStates()
 		sideBarNewBtn.Text = "NEW HUB (V3.2)"
 	end
 
-	-- Old Hub Button State
 	if currentActiveHub == "Old" then
 		sideBarOldBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- Transparent Green
 		sideBarOldBtn.BackgroundTransparency = 0.4
@@ -193,41 +191,77 @@ local function updateSideBarActiveStates()
 	end
 end
 
--- Close Current Active Hub
-local function destroyActiveHubs()
+-- ==========================================================
+-- Complete Master Unexecution Engine
+-- ==========================================================
+local function unexecuteHubs()
+	-- 1. Execute global unexecution callback if defined by loaded script
+	if typeof(_G.R4UnexecuteCurrentHub) == "function" then
+		pcall(_G.R4UnexecuteCurrentHub)
+		_G.R4UnexecuteCurrentHub = nil
+	end
+
+	-- 2. Destroy all known Hub GUIs across CoreGui & PlayerGui
 	local coreGui = game:GetService("CoreGui")
 	local pGui = localPlayer:WaitForChild("PlayerGui")
-	local targets = {
-		coreGui:FindFirstChild("R4HandsHub_New"),
-		coreGui:FindFirstChild("R4HandsHub_Old"),
-		pGui:FindFirstChild("R4HandsHub_New"),
-		pGui:FindFirstChild("R4HandsHub_Old"),
-		pGui:FindFirstChild("InvisibilityGUI")
+	
+	local guiNames = {
+		"R4HandsHub", "R4HandsHub_New", "R4HandsHub_Old",
+		"R4_LoadingScreen", "R4_NewHubLoading", "R4_OldHubLoading",
+		"InvisibilityGUI", "NotifGui", "FlyGuiV3"
 	}
 
-	for _, gui in ipairs(targets) do
-		if gui then
-			pcall(function() gui:Destroy() end)
+	for _, name in ipairs(guiNames) do
+		local g1 = coreGui:FindFirstChild(name)
+		if g1 then pcall(function() g1:Destroy() end) end
+		local g2 = pGui:FindFirstChild(name)
+		if g2 then pcall(function() g2:Destroy() end) end
+	end
+
+	-- 3. Destroy created physical exploit parts from workspace
+	local partNames = {"invischair", "AirWalkPlatform", "NovolineVoidSafetyFloor", "AnnoyPart", "AirWalkControl"}
+	for _, name in ipairs(partNames) do
+		for _, obj in ipairs(workspace:GetChildren()) do
+			if obj.Name == name then
+				pcall(function() obj:Destroy() end)
+			end
+		end
+		local pGuiObj = pGui:FindFirstChild(name)
+		if pGuiObj then pcall(function() pGuiObj:Destroy() end) end
+	end
+
+	-- 4. Reset Character Humanoid, Transparency & Physics
+	local char = localPlayer.Character
+	if char then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.PlatformStand = false
+			hum.WalkSpeed = 16
+			workspace.CurrentCamera.CameraSubject = hum
+		end
+
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") or part:IsA("Decal") then
+				if part.Name ~= "HumanoidRootPart" then
+					part.Transparency = 0
+				end
+			end
 		end
 	end
 
-	-- Destroy temporary physics objects
-	local invisChair = workspace:FindFirstChild("invischair")
-	if invisChair then pcall(function() invisChair:Destroy() end) end
-
-	-- Restore Camera Subject
-	local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
-	if hum then workspace.CurrentCamera.CameraSubject = hum end
+	currentActiveHub = nil
+	updateSideBarActiveStates()
 end
 
 -- Execute Selected Hub
 local function executeHub(hubType)
 	if currentActiveHub == hubType then
-		createNotification("Notice", hubType .. " Hub is already currently running.", 2)
+		createNotification("Notice", hubType .. " Hub is already active.", 2)
 		return
 	end
 
-	destroyActiveHubs()
+	-- Auto Unexecute the current active hub first!
+	unexecuteHubs()
 	currentActiveHub = hubType
 	updateSideBarActiveStates()
 
@@ -240,8 +274,7 @@ local function executeHub(hubType)
 		end)
 
 		if not success then
-			currentActiveHub = nil
-			updateSideBarActiveStates()
+			unexecuteHubs()
 			createNotification("Execution Error", "Failed to load " .. hubType .. " Hub script.", 4)
 			warn("[R4 Loader Error]: " .. tostring(err))
 		end
@@ -276,7 +309,7 @@ local function createPersistentSideBar()
 	arrowBtn.Size = UDim2.new(0, 28, 0, 48)
 	arrowBtn.Position = UDim2.new(0, 0, 0.5, -24)
 	arrowBtn.BackgroundColor3 = Color3.fromRGB(15, 22, 35)
-	arrowBtn.BackgroundTransparency = 0.5 -- Transparent Arrow
+	arrowBtn.BackgroundTransparency = 0.5
 	arrowBtn.Font = Enum.Font.GothamBold
 	arrowBtn.Text = "<"
 	arrowBtn.TextColor3 = Color3.fromRGB(90, 170, 255)
@@ -602,9 +635,11 @@ local function createHubSelectorMenu()
 	end)
 end
 
--- ==========================================================
+-- Bind Global Hooks
+_G.R4OpenHubSelector = createHubSelectorMenu
+_G.R4UnexecuteAllHubs = unexecuteHubs
+
 -- Execution Entry Point
--- ==========================================================
 runSelectorLoadingSequence()
 createPersistentSideBar()
 createHubSelectorMenu()
