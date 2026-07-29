@@ -192,16 +192,14 @@ local function updateSideBarActiveStates()
 end
 
 -- ==========================================================
--- Complete Master Unexecution Engine
+-- Complete Unexecution & Cleanup Engine
 -- ==========================================================
 local function unexecuteHubs()
-	-- 1. Execute global unexecution callback if defined by loaded script
 	if typeof(_G.R4UnexecuteCurrentHub) == "function" then
 		pcall(_G.R4UnexecuteCurrentHub)
 		_G.R4UnexecuteCurrentHub = nil
 	end
 
-	-- 2. Destroy all known Hub GUIs across CoreGui & PlayerGui
 	local coreGui = game:GetService("CoreGui")
 	local pGui = localPlayer:WaitForChild("PlayerGui")
 	
@@ -218,7 +216,6 @@ local function unexecuteHubs()
 		if g2 then pcall(function() g2:Destroy() end) end
 	end
 
-	-- 3. Destroy created physical exploit parts from workspace
 	local partNames = {"invischair", "AirWalkPlatform", "NovolineVoidSafetyFloor", "AnnoyPart", "AirWalkControl"}
 	for _, name in ipairs(partNames) do
 		for _, obj in ipairs(workspace:GetChildren()) do
@@ -230,7 +227,6 @@ local function unexecuteHubs()
 		if pGuiObj then pcall(function() pGuiObj:Destroy() end) end
 	end
 
-	-- 4. Reset Character Humanoid, Transparency & Physics
 	local char = localPlayer.Character
 	if char then
 		local hum = char:FindFirstChildOfClass("Humanoid")
@@ -253,15 +249,33 @@ local function unexecuteHubs()
 	updateSideBarActiveStates()
 end
 
--- Execute Selected Hub
+-- Monitor Active Hub UI Destruction (Resets state if user closes with 'X')
+local function monitorActiveGui(guiInstance, hubType)
+	if not guiInstance then return end
+	guiInstance.Destroying:Connect(function()
+		if currentActiveHub == hubType then
+			currentActiveHub = nil
+			updateSideBarActiveStates()
+		end
+	end)
+end
+
+-- Bi-Directional Infinite Hub Execution Handler
 local function executeHub(hubType)
-	if currentActiveHub == hubType then
-		createNotification("Notice", hubType .. " Hub is already active.", 2)
+	local coreGui = game:GetService("CoreGui")
+	local pGui = localPlayer:WaitForChild("PlayerGui")
+	local existingGui = (hubType == "New")
+		and (coreGui:FindFirstChild("R4HandsHub_New") or pGui:FindFirstChild("R4HandsHub_New"))
+		or (coreGui:FindFirstChild("R4HandsHub_Old") or pGui:FindFirstChild("R4HandsHub_Old"))
+
+	if currentActiveHub == hubType and existingGui then
+		createNotification("Notice", hubType .. " Hub is already running.", 2)
 		return
 	end
 
-	-- Auto Unexecute the current active hub first!
+	-- Cleanly stop any running hub
 	unexecuteHubs()
+
 	currentActiveHub = hubType
 	updateSideBarActiveStates()
 
@@ -273,7 +287,13 @@ local function executeHub(hubType)
 			loadstring(game:HttpGet(targetUrl))()
 		end)
 
-		if not success then
+		if success then
+			task.wait(0.2)
+			local newGui = (hubType == "New")
+				and (coreGui:FindFirstChild("R4HandsHub_New") or pGui:FindFirstChild("R4HandsHub_New"))
+				or (coreGui:FindFirstChild("R4HandsHub_Old") or pGui:FindFirstChild("R4HandsHub_Old"))
+			if newGui then monitorActiveGui(newGui, hubType) end
+		else
 			unexecuteHubs()
 			createNotification("Execution Error", "Failed to load " .. hubType .. " Hub script.", 4)
 			warn("[R4 Loader Error]: " .. tostring(err))
