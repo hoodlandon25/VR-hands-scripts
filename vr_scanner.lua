@@ -1,5 +1,4 @@
 local source = [=[
-if game.PlaceId ~= 116463962153167 then return end
 local Logic = (function()
 local Logic = {}
 
